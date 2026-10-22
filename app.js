@@ -3609,7 +3609,9 @@
         const signupEmail=method==='phone'?phoneLoginEmail(phone):email;
         const options=method==='phone'
           ? {data:{signup_method:'phone_alias',phone_local:'0'+phone.slice(3),phone_e164:phone,display_name:displayName}}
-          : {emailRedirectTo:window.location.origin,data:{display_name:displayName,terms_version:'1.0',terms_accepted_at:new Date().toISOString()}};
+          : {
+emailRedirectTo:`${window.location.origin}${window.location.pathname}`
+,data:{display_name:displayName,terms_version:'1.0',terms_accepted_at:new Date().toISOString()}};
         const {data,error}=await db.auth.signUp({email:signupEmail,password,options});
         if(error)throw error;
         if(data.session){
