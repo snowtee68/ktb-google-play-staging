@@ -646,7 +646,7 @@
       if(!riderWaitingJobPollTimer){
         riderWaitingJobPollTimer=setInterval(()=>{
           if(document.visibilityState==='visible'&&myRiderApplication?.status==='approved'&&myRiderOnline)loadRiderJobInbox({quiet:true});
-        },180000);
+        },20000);
       }
     }catch(err){console.warn('rider realtime skipped',err);}
   }
