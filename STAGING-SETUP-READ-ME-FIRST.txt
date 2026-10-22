@@ -1,0 +1,52 @@
+KTB GOOGLE PLAY TESTING — STATIC WEBSITE TEMPLATE
+==============================
+
+Backend: Supabase FREE Project jpttvkgrvcwhcsysrkjw (Tokyo).
+Production Project: deliberately NOT referenced anywhere in this deployable ZIP.
+
+IMPORTANT: THIS IS A PREPARED TEMPLATE, NOT A FUNCTIONAL DEPLOYMENT YET.
+
+STEP 1 — PUBLIC KEY
+Open Supabase dashboard -> Project jpttvkgrvcwhcsysrkjw -> Project Settings -> API Keys.
+Copy ONLY the public 'publishable' (sb_publishable_...) OR legacy anon key.
+Do NOT use service_role, secret, database password, or any private token.
+Edit just root config.js:
+  const stagingPublicKey = "";
+into:
+  const stagingPublicKey = "YOUR_FREE_PROJECT_PUBLIC_KEY";
+The root, test/, rider/, rider-test/ all load this ONE root config.js.
+
+STEP 2 — HOST IN AN INDEPENDENT STAGING SITE
+Use a separate GitHub Pages repository or other staging host.
+DO NOT overwrite or deploy the real site.
+This ZIP deliberately includes NO CNAME file, workflow, APK, private SQL, or database migrations.
+Even if the current GitHub test repository carries the main domain, confirm
+Settings -> Pages -> Custom domain is empty before staging deployment.
+GitHub Pages requires HTTPS for Supabase Auth / browser permissions.
+
+STEP 3 — SUPABASE AUTH URLs
+In staging Supabase Auth -> URL Configuration, configure the REAL staging
+web origin as Site URL and Redirect URLs. Do not edit Production Auth settings.
+
+STEP 4 — SEED TEST DATA ONLY
+One staging test account exists already, but shop/products/rider are empty.
+Add fictional test shop(s), mock menu/pricing/QR, test seller and test rider.
+NEVER copy Production user/order/payments/rider tokens, webhook secrets or bank QR.
+Never enable Production network functions or FCM keys in staging.
+
+STEP 5 — TEST BEFORE GOOGLE REVIEW
+Check customer login, market profiles, shop approvals, checkout, seller confirmation,
+rider job assignments, payout display and order state changes using test accounts.
+The Google Play APK STILL points to Production until its build/config is addressed.
+A standalone staging website DOES NOT change the Android APK automatically.
+Push/FCM is disabled on this staging template pending separate staging setup;
+do not call the full workflow production-ready or submit the APK on this basis alone.
+
+CHANGES FROM ZIP PROVIDED
+- Replaced Production Supabase reference with FREE project endpoint.
+- Root config.js is the single config consumed by all 4 frontends.
+- Removed Production custom domain CNAME, SEO references, old SQL and APK.
+- No-index staging + visible test-only banner.
+- Disabled Android native FCM bridge and removed existing Rider VAPID key.
+- Kept order.js, checkout, seller, rider, Realtime logic as in uploaded source.
+- No changes to any GitHub repository or live Supabase were made by this preparation.
