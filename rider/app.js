@@ -37,7 +37,7 @@
   let pushSubscription = null;
   let riderHistoryRows = [];
   let riderHistoryFilter = 'completed';
-  const RIDER_PUSH_SUBSCRIPTION_VERSION = '0.5.22.128';
+  const RIDER_PUSH_SUBSCRIPTION_VERSION = '0.5.22.128-STAGING-WEBPUSH-R1';
 
   function haversine(lat1,lng1,lat2,lng2){
     const R=6371, dLat=(lat2-lat1)*Math.PI/180, dLng=(lng2-lng1)*Math.PI/180;
