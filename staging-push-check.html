@@ -1,0 +1,137 @@
+<!doctype html>
+<html lang="th"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>SNOWTEE Staging — Web Push Check R2</title>
+<link rel="manifest" href="./staging-push-test.webmanifest?v=2">
+<link rel="apple-touch-icon" href="./icons/apple-touch-icon.png">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<style>
+body{font:16px/1.65 system-ui,-apple-system,"Segoe UI",sans-serif;margin:0;background:#f6f7fa;color:#171923}main{max-width:720px;margin:16px auto;padding:20px;background:white;border-radius:15px;box-shadow:0 3px 20px #0001}h1{font-size:24px;margin:0 0 8px}h2{font-size:18px}button{font-size:16px;cursor:pointer;border:0;border-radius:9px;padding:12px 16px;margin:4px;background:#a31e27;color:white}button:disabled{opacity:.6;cursor:wait}#log{padding:14px;background:#101827;color:#e4e9fa;border-radius:10px;white-space:pre-wrap;overflow-wrap:anywhere;font:13px/1.6 ui-monospace,monospace;min-height:200px}p{margin:10px 0}.hint{background:#fff5d6;border-radius:9px;padding:12px}.pill{display:inline-block;border-radius:12px;background:#e2e8f0;padding:2px 9px;font-size:12px}</style>
+<script src="config.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+</head><body><main>
+<h1>🔔 ตรวจสอบ Web Push (STAGING ONLY)</h1><p><span class="pill">โครงการกระทุ่มแบนไปด้วยกัน • iOS FIX R2</span></p>
+<p>หน้านี้ใช้ฐานข้อมูลทดสอบเท่านั้น และไม่สร้างออเดอร์ ไม่รับงาน หรือเรียก Rider จริง</p>
+<div class="hint"><b>สำหรับ iPhone:</b> ให้เปิด <b>หน้านี้ใน Safari</b> → แชร์ → <b>เพิ่มไปยังหน้าจอโฮม</b> → เปิด <b>Open as Web App</b> → เพิ่ม จากนั้นกลับหน้าจอโฮมและกดไอคอน <b>Push TEST</b> ที่สร้างขึ้น (อย่าเปิดลิงก์จาก LINE/ChatGPT อีก) รองรับ iOS 16.4 ขึ้นไป</div>
+<div id="loginPanel" style="border:1px solid #ddd;padding:12px;border-radius:10px;margin:14px 0">
+  <b>เข้าสู่ระบบบัญชีทดสอบในหน้านี้</b>
+  <p style="font-size:13px;color:#565">เว็บแอปที่เพิ่มใหม่อาจมีสถานะล็อกอินแยกจาก Safari จึงสามารถเข้าสู่ระบบที่นี่ได้โดยตรง รหัสผ่านไม่บันทึกในหน้าเว็บ</p>
+  <label>เบอร์โทรทดสอบหรืออีเมล <input id="testLogin" type="text" autocomplete="username" style="width:100%;padding:10px;box-sizing:border-box;margin:5px 0 8px" placeholder="08xxxxxxxx หรืออีเมล"></label>
+  <label>รหัสผ่าน <input id="testPassword" type="password" autocomplete="current-password" style="width:100%;padding:10px;box-sizing:border-box;margin:5px 0 8px"></label>
+  <button id="login" type="button">เข้าสู่ระบบ Staging</button><button id="logout" type="button">ออกจากระบบ</button>
+</div>
+<h2>ทดสอบทีละขั้นตอน</h2>
+<button id="status">1. ตรวจสถานะ</button>
+<button id="enable">2. เปิด Web Push เครื่องนี้</button>
+<button id="local">3. แจ้งเตือนภายในเครื่อง</button>
+<button id="server">4. ส่งจริงจาก Supabase</button>
+<p>ผลการตรวจ:</p><pre id="log">กำลังตรวจสถานะ...</pre>
+<p><a href="./">กลับไปหน้า Staging</a></p>
+</main><script>
+(()=>{
+'use strict';
+const out=document.getElementById('log');
+const expected='jpttvkgrvcwhcsysrkjw';
+let db=null;
+const say=(message)=>{out.textContent+='\n'+new Date().toLocaleTimeString('th-TH')+'  '+message;};
+const errorText=(e)=>String(e?.message||e||'ไม่ทราบข้อผิดพลาด');
+const isIOS=/iPhone|iPad|iPod/i.test(navigator.userAgent);
+const standalone=()=>((typeof window.matchMedia==='function'&&window.matchMedia('(display-mode: standalone)').matches)||navigator.standalone===true);
+const supportsSW=()=>('serviceWorker' in navigator&&typeof navigator.serviceWorker?.register==='function');
+const supportsPush=()=>('PushManager' in window);
+const supportsNotifications=()=>('Notification' in window&&typeof window.Notification?.requestPermission==='function');
+const requireHomeScreen=()=>{if(isIOS&&!standalone())throw new Error('iPhone: ต้องเปิด Push TEST จากไอคอนหน้าจอโฮม ไม่ใช่เปิดจาก Safari หรือแชต');};
+const api=()=>{
+  const cfg=window.APP_CONFIG||{};
+  if(window.KTB_STAGING_ONLY!==true||!String(cfg.SUPABASE_URL||'').includes(expected))throw new Error('STOP: ไม่ใช่ Supabase Staging');
+  if(!window.supabase?.createClient)throw new Error('โหลด Supabase JS ไม่ได้ โปรดตรวจอินเทอร์เน็ต');
+  db=db||window.supabase.createClient(cfg.SUPABASE_URL,cfg.SUPABASE_ANON_KEY);
+  return db;
+};
+const requireUser=async()=>{const {data,error}=await api().auth.getUser();if(error||!data?.user)throw new Error('ยังไม่ได้เข้าสู่ระบบใน Push TEST กรุณา Login ด้วยบัญชีทดสอบในช่องด้านบน');return data.user;};
+const worker=async()=>{
+  requireHomeScreen();
+  if(!supportsSW()||!supportsPush()||!supportsNotifications())throw new Error('อุปกรณ์หรือโหมดนี้ไม่รองรับ Web Push ตรวจ iOS >=16.4 และเปิดผ่านไอคอน Push TEST');
+  return navigator.serviceWorker.register('./sw.js',{scope:'./',updateViaCache:'none'});
+};
+const bytes=(v)=>{const s=String(v).replace(/-/g,'+').replace(/_/g,'/');const bin=atob(s+'='.repeat((4-s.length%4)%4));return Uint8Array.from(bin,c=>c.charCodeAt(0));};
+const normalizedEmail=(s)=>{
+  const input=String(s||'').trim();if(input.includes('@'))return input;
+  const d=input.replace(/\D/g,'');
+  if(/^0\d{9}$/.test(d))return '66'+d.slice(1)+'@phone.talad-kratumbaen.invalid';
+  if(/^66\d{9}$/.test(d))return d+'@phone.talad-kratumbaen.invalid';
+  throw new Error('กรอกเบอร์โทร 10 หลักหรืออีเมลบัญชีทดสอบ');
+};
+document.getElementById('login').onclick=async()=>{
+  out.textContent='STAGING TEST SIGN IN';
+  try{const email=normalizedEmail(document.getElementById('testLogin').value);const password=document.getElementById('testPassword').value;
+    if(!password)throw new Error('กรอกรหัสผ่าน');
+    const {error}=await api().auth.signInWithPassword({email,password});document.getElementById('testPassword').value='';
+    if(error)throw error;say('✅ เข้าสู่ระบบ Staging สำเร็จ');
+  }catch(e){say('❌ '+errorText(e));}
+};
+document.getElementById('logout').onclick=async()=>{out.textContent='STAGING SIGN OUT';try{await api().auth.signOut();say('ออกจากบัญชีทดสอบแล้ว');}catch(e){say('❌ '+errorText(e));}};
+document.getElementById('status').onclick=async()=>{
+ out.textContent='STAGING PUSH STATUS — R2';
+ say('iPhone/iPad: '+isIOS+'; โหมด Web App จากหน้าจอโฮม: '+standalone());
+ say('ServiceWorker: '+supportsSW()+'; PushManager: '+supportsPush()+'; Notification: '+supportsNotifications());
+ if(isIOS&&!standalone())say('⚠️ คุณยังเปิดจาก Safari/แชต ต้องเพิ่มหน้านี้ไปหน้าจอโฮมและเปิดจากไอคอน Push TEST ก่อน');
+ try{
+   const cfg=window.APP_CONFIG||{}, c=api();
+   const {data:session}=await c.auth.getSession();
+   say('Login: '+(session?.session?.user?'✅ '+session.session.user.id.slice(0,8)+'...':'ยังไม่ได้ Login ใน Push TEST'));
+   say('VAPID Rider config: '+String(cfg.RIDER_PUSH_VAPID_PUBLIC_KEY||'').length+' ตัวอักษร');
+   const {data,error}=await c.from('market_push_config').select('vapid_public_key').eq('id',1).maybeSingle();
+   say(error?'อ่าน VAPID DB ไม่ได้: '+error.message:'VAPID DB: '+(data?.vapid_public_key?.length||0)+' ตัวอักษร');
+   if(supportsSW()&&typeof navigator.serviceWorker.getRegistration==='function'){
+     const reg=await navigator.serviceWorker.getRegistration('./');
+     if(reg&&reg.pushManager&&typeof reg.pushManager.getSubscription==='function'){
+       const sub=await reg.pushManager.getSubscription();
+       say('Subscription ในเครื่อง: '+(sub?'พบแล้ว':'ยังไม่มี'));
+     }else say('Subscription: ยังไม่พร้อมในโหมดนี้');
+   }else say('Service Worker Registration API ไม่พร้อมใช้งาน');
+ }catch(e){say('❌ '+errorText(e));}
+};
+document.getElementById('enable').onclick=async()=>{
+ out.textContent='ENABLE WEB PUSH — STAGING R2';
+ try{
+  api();requireHomeScreen();
+  if(!supportsSW()||!supportsPush()||!supportsNotifications())throw new Error('Web Push ไม่พร้อม: iPhone ต้อง iOS 16.4+ และเปิดจากไอคอน Push TEST');
+  // Request permission before any await, while the button's user activation is live.
+  const permissionPromise=Notification.permission==='granted'?Promise.resolve('granted'):Notification.requestPermission();
+  const permission=await permissionPromise;
+  if(permission!=='granted')throw new Error('ยังไม่อนุญาต Notifications: '+permission);
+  const u=await requireUser();
+  const {data,error}=await api().from('market_push_config').select('vapid_public_key').eq('id',1).maybeSingle();
+  if(error||!data?.vapid_public_key)throw new Error(error?.message||'ไม่มี Public VAPID Key ใน Staging');
+  const reg=await worker();if(!reg.pushManager)throw new Error('Service Worker นี้ไม่มี PushManager');
+  let sub=await reg.pushManager.getSubscription();
+  if(!sub){sub=await reg.pushManager.subscribe({userVisibleOnly:true,applicationServerKey:bytes(data.vapid_public_key)});say('สร้าง Subscription ใหม่สำเร็จ');}
+  else say('ใช้ Subscription ที่มีอยู่แล้ว (ไม่ลบและสร้างซ้ำ)');
+  const j=sub.toJSON();
+  if(!j.endpoint||!j.keys?.p256dh||!j.keys?.auth)throw new Error('อุปกรณ์ส่ง Push Subscription ไม่ครบ');
+  const {error:saveError}=await api().from('market_push_subscriptions').upsert({user_id:u.id,endpoint:j.endpoint,p256dh:j.keys.p256dh,auth:j.keys.auth,user_agent:navigator.userAgent,updated_at:new Date().toISOString()},{onConflict:'user_id,endpoint'});
+  if(saveError)throw new Error('บันทึก Subscription ไม่สำเร็จ: '+saveError.message);
+  say('✅ บันทึก Subscription สำหรับบัญชี '+u.id.slice(0,8)+'... สำเร็จ');
+  say('ต่อไปกดปุ่ม 3 แล้วปุ่ม 4');
+ }catch(e){say('❌ '+errorText(e));}
+};
+document.getElementById('local').onclick=async()=>{
+ out.textContent='LOCAL NOTIFICATION TEST';
+ try{api();const reg=await worker();if(Notification.permission!=='granted')throw new Error('ยังไม่ได้อนุญาต Notifications ให้กดปุ่ม 2 ก่อน');
+   await reg.showNotification('🔔 ทดสอบแจ้งเตือน Staging',{body:'ทดสอบบนอุปกรณ์นี้ (ไม่ใช่การส่งจากเซิร์ฟเวอร์)',tag:'ktb-staging-local-r2-'+Date.now()});
+   say('✅ ระบบยอมรับคำสั่งแสดง Notification ตรวจที่ศูนย์การแจ้งเตือนของเครื่อง');
+ }catch(e){say('❌ '+errorText(e));}
+};
+document.getElementById('server').onclick=async()=>{
+ out.textContent='SERVER WEB PUSH TEST';
+ try{await requireUser();const {data,error}=await api().functions.invoke('send-order-push',{body:{event:'test_push'}});
+   if(error)throw error;
+   say('Supabase Push service accepted: '+Number(data?.sent||0)+' เครื่อง');
+   say('รายละเอียด: '+JSON.stringify(data));
+   if(Number(data?.sent||0)>0)say('✅ Server รับส่ง Push แล้ว แต่ต้องตรวจ Notification บนอุปกรณ์จริง');
+   else say('⚠️ ยังไม่มีปลายทางที่ส่งสำเร็จ ตรวจ Subscription และ Logs');
+ }catch(e){say('❌ '+errorText(e));}
+};
+document.getElementById('status').click();
+})();
+</script></body></html>
