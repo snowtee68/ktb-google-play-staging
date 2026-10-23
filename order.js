@@ -506,8 +506,15 @@
         .subscribe(status=>{if(status==='CHANNEL_ERROR'||status==='TIMED_OUT')console.warn('Delivery Realtime:',status)});
     }catch(err){console.warn('Order Realtime setup:',err?.message||err)}
     // Low-frequency safety net only: 5 minutes instead of every 15 seconds.
-    orderNotifyTimer=setInterval(()=>{if(document.visibilityState==='visible')pollOrderNotifications()},300000);
+    orderNotifyTimer=setInterval(()=>{if(document.visibilityState==='visible')pollOrderNotifications()},20000);
   }
+  // STAGING-NOTIFY-R1: refresh immediately when a background tab becomes visible.
+  // Push when app is closed still requires the separate STAGING Edge Function/Webhooks.
+  document.addEventListener('visibilitychange',()=>{
+    if(document.visibilityState==='visible' && session && canUseOrders()){
+      pollOrderNotifications().catch(err=>console.warn('[STAGING-NOTIFY-R1] foreground reconcile failed',err));
+    }
+  });
   function markSellerOrdersViewed(shopId){
     if(!shopId)return;
     db.from('market_orders').select('id').eq('shop_id',shopId).in('status',['pending_shop','awaiting_payment','payment_review']).limit(100).then(({data})=>{

@@ -8,7 +8,7 @@
   window.APP_CONFIG = {
     SUPABASE_URL: stagingUrl,
     SUPABASE_ANON_KEY: stagingPublicKey,
-    RIDER_PUSH_VAPID_PUBLIC_KEY: "" // Push delivery not configured on staging yet
+    RIDER_PUSH_VAPID_PUBLIC_KEY: "BPsZGrQSjm5xbxnEParOo63LvbSdaOv2vP4a-GIp4hd3wuoWxPIGfjBlO0GCTzDEYykumEFtySyxZHNAMuer3qM" // STAGING ONLY: public test VAPID key; server setup required
   };
   if (!stagingPublicKey) {
     console.warn("KTB STAGING: Public Supabase key not yet configured. No production fallback.");

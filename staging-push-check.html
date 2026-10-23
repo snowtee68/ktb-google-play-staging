@@ -1,0 +1,95 @@
+<!doctype html>
+<html lang="th"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>SNOWTEE Staging — Web Push Check R1</title>
+<style>
+body{font:16px/1.65 system-ui,-apple-system,"Segoe UI",sans-serif;margin:0;background:#f6f7fa;color:#171923}main{max-width:720px;margin:16px auto;padding:20px;background:white;border-radius:15px;box-shadow:0 3px 20px #0001}h1{font-size:24px;margin:0 0 8px}h2{font-size:18px}button{font-size:16px;cursor:pointer;border:0;border-radius:9px;padding:12px 16px;margin:4px;background:#a31e27;color:white}button:disabled{opacity:.6;cursor:wait}#log{padding:14px;background:#101827;color:#e4e9fa;border-radius:10px;white-space:pre-wrap;overflow-wrap:anywhere;font:13px/1.6 ui-monospace,monospace;min-height:200px}p{margin:10px 0}.hint{background:#fff5d6;border-radius:9px;padding:12px}.pill{display:inline-block;border-radius:12px;background:#e2e8f0;padding:2px 9px;font-size:12px}</style>
+<script src="config.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+</head><body><main>
+<h1>🔔 ตรวจสอบ Web Push (STAGING ONLY)</h1><p><span class="pill">โครงการกระทุ่มแบนไปด้วยกัน • 23 ต.ค. 2569</span></p>
+<p>หน้านี้ใช้ฐานข้อมูลทดสอบเท่านั้น และไม่สร้างออเดอร์ ไม่รับงาน หรือเรียก Rider จริง</p>
+<div class="hint">iPhone: เปิดเว็บ Staging ผ่าน Safari → Share → เพิ่มไปยังหน้าจอโฮม แล้วเปิดจากไอคอนบน Home Screen ก่อนทำขั้นตอนต่อไป ต้องเข้าสู่ระบบบัญชีทดสอบในแอปหลักก่อน</div>
+<h2>ทดสอบทีละขั้นตอน</h2>
+<button id="status">1. ตรวจสถานะ</button>
+<button id="enable">2. เปิด Web Push เครื่องนี้</button>
+<button id="local">3. แจ้งเตือนภายในเครื่อง</button>
+<button id="server">4. ส่งจริงจาก Supabase</button>
+<p>ผลการตรวจ:</p><pre id="log">กำลังตรวจสถานะ...</pre>
+<p><a href="./">กลับไปหน้า Staging</a></p>
+</main><script>
+(()=>{
+  const cfg=window.APP_CONFIG||{}, out=document.getElementById('log');
+  const say=(t)=>{out.textContent+='\n'+new Date().toLocaleTimeString('th-TH')+'  '+t;};
+  let db=null;
+  const expected='jpttvkgrvcwhcsysrkjw';
+  const checkProject=()=>{
+    if(!window.KTB_STAGING_ONLY || !String(cfg.SUPABASE_URL||'').includes(expected))throw new Error('STOP: ไม่ใช่ Supabase Staging');
+    if(!window.supabase?.createClient)throw new Error('ไม่โหลด Supabase JS (ตรวจอินเทอร์เน็ต)');
+    db=db||supabase.createClient(cfg.SUPABASE_URL,cfg.SUPABASE_ANON_KEY);
+    return db;
+  };
+  const user=async()=>{
+    const api=checkProject();const {data:{user},error}=await api.auth.getUser();
+    if(error||!user)throw new Error('กรุณา Login ด้วยบัญชีทดสอบบนหน้าเว็บ Staging ก่อน');
+    return user;
+  };
+  const worker=async()=>{
+    if(!('serviceWorker' in navigator)||!('PushManager' in window)||!('Notification' in window))throw new Error('เบราว์เซอร์/โหมดนี้ไม่รองรับ Web Push');
+    return await navigator.serviceWorker.register('./sw.js?v=staging-webpush-r1',{scope:'./',updateViaCache:'none'});
+  };
+  const keyBytes=(v)=>{const s=String(v).replace(/-/g,'+').replace(/_/g,'/');const raw=atob(s+'='.repeat((4-s.length%4)%4));return Uint8Array.from(raw,c=>c.charCodeAt(0));};
+  document.getElementById('status').onclick=async()=>{
+    out.textContent='STAGING PUSH STATUS';
+    try{
+      const api=checkProject(), u=await user();say('บัญชี: login แล้ว (User ID '+u.id.slice(0,8)+'...)');
+      say('Notification permission: '+(window.Notification?.permission||'unsupported'));
+      say('iPhone Standalone: '+(matchMedia('(display-mode: standalone)').matches||navigator.standalone===true));
+      say('ServiceWorker/PushManager: '+('serviceWorker' in navigator)+' / '+('PushManager' in window));
+      const reg=await navigator.serviceWorker.getRegistration('./');const sub=reg?await reg.pushManager.getSubscription():null;
+      say('Push subscription ในอุปกรณ์: '+(sub?'พบแล้ว':'ยังไม่มี'));
+      const {data, error}=await api.from('market_push_config').select('vapid_public_key').eq('id',1).maybeSingle();
+      say(error?'อ่าน VAPID DB ไม่สำเร็จ: '+error.message:'VAPID ใน DB: '+(data?.vapid_public_key?.length||0)+' อักขระ');
+      say('VAPID Rider config: '+(cfg.RIDER_PUSH_VAPID_PUBLIC_KEY?.length||0)+' อักขระ');
+      if(sub){const {count,error:e}=await api.from('market_push_subscriptions').select('id',{count:'exact',head:true}).eq('user_id',u.id).eq('endpoint',sub.endpoint);say(e?'ตรวจ DB subscription ไม่ได้: '+e.message:'บันทึก subscription ใน DB: '+count);}
+    }catch(e){say('❌ '+e.message)}
+  };
+  document.getElementById('enable').onclick=async()=>{
+    out.textContent='ENABLING STAGING WEB PUSH';
+    try{
+      const api=checkProject();
+      if(/iPhone|iPad|iPod/i.test(navigator.userAgent) && !(matchMedia('(display-mode: standalone)').matches||navigator.standalone===true)) throw new Error('iPhone ต้องเปิดจากไอคอนเว็บแอปบนหน้าจอโฮมก่อน');
+      const permission=await Notification.requestPermission();if(permission!=='granted')throw new Error('ไม่ได้อนุญาต Notifications: '+permission);
+      const u=await user();
+      const {data,error}=await api.from('market_push_config').select('vapid_public_key').eq('id',1).maybeSingle();
+      if(error||!data?.vapid_public_key)throw new Error(error?.message||'ยังไม่มี VAPID Public Key ใน Supabase Staging');
+      if(data.vapid_public_key!==cfg.RIDER_PUSH_VAPID_PUBLIC_KEY) say('⚠️ config.js Rider key และ DB key ไม่ตรงกัน');
+      const reg=await worker();let sub=await reg.pushManager.getSubscription();
+      if(sub){await sub.unsubscribe();say('ลบ subscription เก่าบนเครื่องเพื่อสร้างจาก VAPID Staging ใหม่');}
+      sub=await reg.pushManager.subscribe({userVisibleOnly:true,applicationServerKey:keyBytes(data.vapid_public_key)});
+      const j=sub.toJSON();
+      const {error:saveErr}=await api.from('market_push_subscriptions').upsert({user_id:u.id,endpoint:j.endpoint,p256dh:j.keys?.p256dh,auth:j.keys?.auth,user_agent:navigator.userAgent,updated_at:new Date().toISOString()},{onConflict:'user_id,endpoint'});
+      if(saveErr)throw new Error('สร้าง Subscription ได้ แต่บันทึก DB ไม่สำเร็จ: '+saveErr.message);
+      say('✅ Push subscription บันทึกใน Supabase Staging แล้ว');
+      say('ต่อไปกดข้อ 4 เพื่อส่งจริงจาก Supabase');
+    }catch(e){say('❌ '+e.message)}
+  };
+  document.getElementById('local').onclick=async()=>{
+    out.textContent='LOCAL NOTIFICATION TEST';
+    try{checkProject();const reg=await worker();if(Notification.permission!=='granted')throw new Error('ยังไม่ได้อนุญาต Notification');
+      await reg.showNotification('🔔 ทดสอบแจ้งเตือนเฉพาะเครื่อง',{body:'นี่คือการทดสอบ Service Worker ไม่ใช่การส่งจากเซิร์ฟเวอร์',tag:'ktb-staging-local',renotify:true});
+      say('✅ ส่งคำสั่งแสดง Notification ภายในเครื่องแล้ว');
+    }catch(e){say('❌ '+e.message)}
+  };
+  document.getElementById('server').onclick=async()=>{
+    out.textContent='SERVER WEB PUSH TEST';
+    try{const api=checkProject();await user();const {data,error}=await api.functions.invoke('send-order-push',{body:{event:'test_push'}});
+      if(error)throw new Error(error.message||String(error));
+      say('Supabase ส่งถึง Push service: '+Number(data?.sent||0)+' เครื่อง');
+      say('รายละเอียด: '+JSON.stringify(data));
+      if(!Number(data?.sent))say('⚠️ ยังส่งไม่ได้ ตรวจ Edge Function Logs และ Subscription');
+      else say('✅ Server accepted ส่งแล้ว ตรวจ Notification จริงที่เครื่อง (ไม่รับประกันแสดงผลทุกครั้ง)');
+    }catch(e){say('❌ '+e.message)}
+  };
+  document.getElementById('status').click();
+})();
+</script></body></html>
