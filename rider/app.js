@@ -1,10 +1,6 @@
 (() => {
   console.info('Talad Krathumbaen Rider v0.5.22.128 History and Income loaded');
   const cfg = window.APP_CONFIG || {};
-  if (!cfg.SUPABASE_URL || !cfg.SUPABASE_ANON_KEY) {
-    console.warn('[KTB staging] Public Supabase key missing in ../config.js');
-    return;
-  }
   const db = supabase.createClient(cfg.SUPABASE_URL, cfg.SUPABASE_ANON_KEY);
   let session = null;
   let profile = null;
