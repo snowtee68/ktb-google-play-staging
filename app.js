@@ -411,6 +411,53 @@
     return `<div class="rider-job-owned">งานของคุณ · ${esc(riderJobInboxStatusLabel(job.status))}</div>`;
   }
 
+  // Rider item checklist: read-only snapshot from authorized, assigned batches.
+  function riderItemOptionLabels(value){
+    const items=Array.isArray(value)?value:(typeof value==='string'?(()=>{try{return JSON.parse(value)}catch(_){return []}})():[]);
+    return Array.isArray(items)?items.map(x=>typeof x==='string'?x:(x?.value_name||x?.name||x?.label||'')).filter(Boolean):[];
+  }
+
+  function riderItemsHtml(job){
+    if(!job?.is_mine)return ''; // Never expose order contents before this Rider accepts the job.
+    const items=Array.isArray(job?.rider_items)?job.rider_items:[];
+    if(!items.length)return `<div class="rider-job-section"><strong>📦 รายการสินค้าที่ต้องรับ</strong><div class="muted">ยังไม่มีรายการสินค้าให้ตรวจสอบ กรุณาติดต่อร้านก่อนรับสินค้า</div></div>`;
+    const byShop=new Map();
+    items.forEach(item=>{
+      const shop=String(item.shop_name||'ร้านค้า');
+      if(!byShop.has(shop))byShop.set(shop,[]);
+      byShop.get(shop).push(item);
+    });
+    const groups=[...byShop].map(([shop,rows])=>{
+      const products=rows.map((item,i)=>{
+        const qty=Math.max(0,Number(item.qty)||0);
+        const opt=riderItemOptionLabels(item.options_json);
+        return `<div style="padding:7px 0;border-top:1px solid #e8e8e8">
+          <div style="display:flex;gap:8px;justify-content:space-between"><span>${i+1}. <b>${esc(item.product_name||'สินค้า')}</b></span><b style="white-space:nowrap">× ${qty.toLocaleString('th-TH')}</b></div>
+          ${opt.length?`<small style="display:block;margin-top:3px">ตัวเลือก: ${esc(opt.join(', '))}</small>`:''}
+          ${item.note?`<small style="display:block;margin-top:3px">📝 หมายเหตุ: ${esc(item.note)}</small>`:''}
+        </div>`;
+      }).join('');
+      return `<div class="rider-stop"><b>🏪 ${esc(shop)}</b>${products}</div>`;
+    }).join('');
+    return `<div class="rider-job-section"><strong>📦 รายการสินค้าที่ต้องรับ · ตรวจเช็กกับร้านก่อนกดรับสินค้าครบ</strong>${groups}</div>`;
+  }
+
+  // Non-invasive fallback: if the read-only RPC has not been installed, all Rider actions remain usable.
+  async function fillRiderInboxItems(jobs){
+    const rows=Array.isArray(jobs)?jobs:[];
+    const ids=[...new Set(rows.filter(j=>j?.is_mine).map(j=>String(j.batch_id||'')).filter(Boolean))];
+    if(!ids.length)return rows;
+    try{
+      const {data,error}=await db.rpc('market_my_rider_batch_items_v1',{p_batch_ids:ids});
+      if(error)throw error;
+      const byBatch=new Map((Array.isArray(data)?data:[]).map(r=>[String(r.batch_id),Array.isArray(r.items)?r.items:[]]));
+      return rows.map(j=>j?.is_mine?{...j,rider_items:byBatch.get(String(j.batch_id))||[]}:j);
+    }catch(err){
+      console.warn('Rider item checklist unavailable (existing workflow unchanged):',err?.message||err);
+      return rows;
+    }
+  }
+
   function riderJobCard(job){
     const waiting=Boolean(job?.can_accept);
     const mine=Boolean(job?.is_mine);
@@ -449,6 +496,7 @@
       <div class="rider-job-meta">${km?`📏 ${km.toFixed(1)} กม.`:''}${shops.length?` · 🏪 ${shops.length} จุดรับ`:''}</div>
 
       <div class="rider-job-section"><strong>จุดรับสินค้า</strong>${shopHtml}</div>
+      ${riderItemsHtml(job)}
 
       <div class="rider-job-section">
         <strong>จุดส่งลูกค้า</strong>
@@ -520,9 +568,10 @@
         if(job?.is_mine&&job?.delivery_arrived_at)return false;
         return true;
       });
+      const jobsWithItems=await fillRiderInboxItems(jobs);
       syncRiderWaitingJobs(jobs,{notify:true});
-      if(box)box.innerHTML=jobs.length?jobs.map(riderJobCard).join(''):'<div class="rider-job-empty">✅ ตอนนี้ยังไม่มีงานใหม่หรืองานที่ต้องดำเนินการ</div>';
-      return jobs;
+      if(box)box.innerHTML=jobsWithItems.length?jobsWithItems.map(riderJobCard).join(''):'<div class="rider-job-empty">✅ ตอนนี้ยังไม่มีงานใหม่หรืองานที่ต้องดำเนินการ</div>';
+      return jobsWithItems;
     }catch(err){
       if(box)box.innerHTML=`<p class="muted">โหลดงาน Rider ไม่สำเร็จ: ${esc(err?.message||err)}</p>`;
       return [];
