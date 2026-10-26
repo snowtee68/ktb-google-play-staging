@@ -322,10 +322,16 @@
 
   function stopRiderNewJobSound(){
     if(riderSoundRepeatTimer){clearTimeout(riderSoundRepeatTimer);riderSoundRepeatTimer=null;}
+    try{window.MarketReviewAudio?.stopRiderVoice?.();}catch(_e){}
   }
 
   function playRiderNewJobSound(){
     stopRiderNewJobSound();
+    // KTB_REVIEW_STAGING_LOCAL_VOICE_R5: speak when the Staging backend
+    // reports a genuinely NEW waiting Rider job; never send Production FCM.
+    if(window.MarketReviewAudio?.playRiderJobVoice){
+      try{window.MarketReviewAudio.playRiderJobVoice();return;}catch(_e){}
+    }
     playRiderAlertSound();
     // เตือนซ้ำอีก 2 รอบเพื่อให้ได้ยินง่ายขึ้น แต่ไม่วนไม่รู้จบ
     let n=0;
@@ -653,7 +659,9 @@
   }
 
   function notifyRiderNewJob(){
-    playRiderAlertSound();
+    if(window.MarketReviewAudio?.playRiderJobVoice){
+      try{window.MarketReviewAudio.playRiderJobVoice();}catch(_e){playRiderAlertSound();}
+    }else playRiderAlertSound();
     try{
       if('Notification' in window && Notification.permission==='granted'){
         new Notification('🛵 มีงาน Rider ใหม่',{body:'มีงาน Delivery ใหม่รอรับ กด “งาน Rider” เพื่อดูรายละเอียด',tag:'market-rider-new-job'});
@@ -3912,6 +3920,8 @@ emailRedirectTo:`${window.location.origin}${window.location.pathname}`
       e.preventDefault();
       if(window.MarketNativeAlert?.testRiderAlert){
         window.MarketNativeAlert.testRiderAlert();
+      }else if(window.MarketReviewAudio?.playRiderJobVoice){
+        window.MarketReviewAudio.playRiderJobVoice();
       }else{
         armRiderAlertAudio();playRiderAlertSound();
       }
@@ -3920,7 +3930,7 @@ emailRedirectTo:`${window.location.origin}${window.location.pathname}`
     if(e.target.closest?.('#stopRiderNativeAudioBtn')){
       e.preventDefault();
       try{window.marketNativeAudioTest?.stop?.();window.MarketNativeAlert?.stopRiderAlert?.();}catch(_e){}
-      stopRiderSoundRepeat?.();
+      stopRiderNewJobSound();
       return;
     }
     const accept=e.target.closest?.('[data-rider-accept-batch]');

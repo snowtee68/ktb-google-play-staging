@@ -239,7 +239,13 @@
     if(orderNotifyAudioArmed)return;orderNotifyAudioArmed=true;
     try{const C=window.AudioContext||window.webkitAudioContext;if(C){const c=new C();const o=c.createOscillator(),g=c.createGain();g.gain.value=0.0001;o.connect(g);g.connect(c.destination);o.start();o.stop(c.currentTime+.01);c.resume?.();window.__marketOrderAudioContext=c;}}catch(_){}
   }
-  function playOrderNotificationSound(){
+  function playOrderNotificationSound(sellerAlert=false){
+    // KTB_REVIEW_STAGING_LOCAL_VOICE_R5: a real Staging seller-order event
+    // plays the SAME pre-recorded Thai voice as the Android Production app.
+    // Customer status updates keep their short, non-urgent web chime.
+    if(sellerAlert&&window.MarketReviewAudio?.playSellerOrderVoice){
+      try{window.MarketReviewAudio.playSellerOrderVoice();return;}catch(_e){}
+    }
     if(!orderNotifyAudioArmed)return;
     try{
       const C=window.AudioContext||window.webkitAudioContext,c=window.__marketOrderAudioContext||new C();window.__marketOrderAudioContext=c;c.resume?.();
@@ -258,6 +264,7 @@
   }
   function stopOrderSoundRepeat(){
     if(orderNotifySoundRepeatTimer){clearInterval(orderNotifySoundRepeatTimer);orderNotifySoundRepeatTimer=null}
+    try{window.MarketReviewAudio?.stopSellerVoice?.();}catch(_e){}
   }
   function startOrderSoundRepeat(){
     stopOrderSoundRepeat();
@@ -265,7 +272,7 @@
     // this function, so buyers are not disturbed by a repeating sound.
     orderNotifySoundRepeatTimer=setInterval(()=>{
       if(document.visibilityState==='visible'&&Number(orderNotifyState.activeSellerOrders||0)>0){
-        playOrderNotificationSound();
+        playOrderNotificationSound(true);
       }
     },10000);
   }
@@ -283,8 +290,11 @@
     orderNotifyState.unread=Math.min(999,Number(orderNotifyState.unread||0)+Math.max(1,count));saveOrderNotifyState();renderOrderNotifyBadge();
     orderNotifyState.bannerTarget=target||null;saveOrderNotifyState();
     // Every real event sounds once; seller action events may also start the alarm loop.
-    playOrderNotificationSound();
+    // Start/replace the repeat timer BEFORE the native first phrase:
+    // startOrderSoundRepeat() clears the previous sound and must not cut
+    // the new Thai voice off after its opening syllable.
     if(repeatSellerSound)startOrderSoundRepeat();
+    playOrderNotificationSound(repeatSellerSound);
   }
   function markNotificationAreaViewed(){
     orderNotifyState.unread=0;saveOrderNotifyState();renderOrderNotifyBadge();stopOrderSoundRepeat();document.getElementById('orderNotifyBanner')?.classList.remove('show');
@@ -653,11 +663,12 @@ if(e.target.closest('#showDeliveryFareInfoBtn'))return showDeliveryFareInfo(fals
       if(e.target.closest('#testOrderNativePushBtn'))return testNativePush('customer');
       if(e.target.closest('#testSellerNativeAudioBtn')){
         if(window.MarketNativeAlert?.testOrderAlert)window.MarketNativeAlert.testOrderAlert();
+        else if(window.MarketReviewAudio?.playSellerOrderVoice)window.MarketReviewAudio.playSellerOrderVoice();
         else{armOrderNotificationAudio();playOrderNotificationSound();}
         return;
       }
       if(e.target.closest('#stopSellerNativeAudioBtn')){
-        try{if(window.MarketNativeAlert?.stopAlert)window.MarketNativeAlert.stopAlert();else window.MarketNativeAlert?.stopOrderAlert?.();}catch(_e){}
+        try{if(window.MarketNativeAlert?.stopAlert)window.MarketNativeAlert.stopAlert();else if(window.MarketReviewAudio?.stopSellerVoice)window.MarketReviewAudio.stopSellerVoice();else window.MarketNativeAlert?.stopOrderAlert?.();}catch(_e){}
         stopOrderSoundRepeat();
         return;
       }
