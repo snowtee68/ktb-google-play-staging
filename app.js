@@ -3275,6 +3275,8 @@
   let adminActiveView='home';
   let adminPendingShops=[];
   let adminAllShops=[];
+  let adminShopTab='approved'; // Show only public/active shops by default.
+  const adminShopTabLabels={approved:'เปิดใช้งาน',pending:'รออนุมัติ',archived:'ปิดใช้งาน',rejected:'ไม่อนุมัติ'};
   function adminShopMatchesSearch(shop,query){
     if(!query)return true;
     const statusText=({pending:'รออนุมัติ pending',approved:'อนุมัติแล้ว approved',rejected:'ไม่อนุมัติ rejected',archived:'ปิดใช้งาน กู้คืน archived'})[shop?.status]||shop?.status||'';
@@ -3285,13 +3287,21 @@
   function renderAdminShopLists(){
     const input=$('adminShopSearchInput');
     const query=String(input?.value||'').trim().toLocaleLowerCase('th');
-    const pending=adminPendingShops.filter(shop=>adminShopMatchesSearch(shop,query));
-    const all=adminAllShops.filter(shop=>adminShopMatchesSearch(shop,query));
-    const pendingGrid=$('pendingGrid'),adminAllGrid=$('adminAllGrid'),status=$('adminShopSearchStatus'),clear=$('adminShopSearchClear');
-    if(pendingGrid)pendingGrid.innerHTML=pending.length?pending.map(s=>shopCard(s,true)).join(''):`<p>${query?'ไม่พบร้านรออนุมัติที่ตรงกับคำค้น':'ไม่มีร้านรออนุมัติ'}</p>`;
-    if(adminAllGrid)adminAllGrid.innerHTML=all.length?all.map(s=>shopCard(s,true)).join(''):`<p>${query?'ไม่พบร้านค้าที่ตรงกับคำค้น':'ยังไม่มีร้านค้า'}</p>`;
-    const archivedCount=adminAllShops.filter(shop=>shop.status==='archived').length;
-    if(status)status.textContent=query?`พบ ${all.length} ร้าน จากทั้งหมด ${adminAllShops.length} ร้าน${pending.length?` • รออนุมัติ ${pending.length} ร้าน`:''}`:`ร้านค้าทั้งหมด ${adminAllShops.length} ร้าน • รออนุมัติ ${adminPendingShops.length} ร้าน • ปิดใช้งาน ${archivedCount} ร้าน`;
+    const all=adminAllShops.filter(shop=>shop.status===adminShopTab&&adminShopMatchesSearch(shop,query));
+    const adminAllGrid=$('adminAllGrid'),status=$('adminShopSearchStatus'),clear=$('adminShopSearchClear');
+    const counts={approved:0,pending:0,archived:0,rejected:0};
+    for(const shop of adminAllShops){if(Object.prototype.hasOwnProperty.call(counts,shop.status))counts[shop.status]++;}
+    document.querySelectorAll('[data-admin-shop-tab]').forEach(btn=>{
+      const key=btn.dataset.adminShopTab;
+      const active=key===adminShopTab;
+      btn.classList.toggle('active',active);
+      btn.setAttribute('aria-selected',String(active));
+      const badge=btn.querySelector('[data-admin-shop-tab-count]');
+      if(badge)badge.textContent=String(counts[key]||0);
+    });
+    if(adminAllGrid)adminAllGrid.innerHTML=all.length?all.map(s=>shopCard(s,true)).join(''):`<p>${query?'ไม่พบร้านที่ตรงกับคำค้นในสถานะนี้':'ไม่มีร้านในสถานะนี้'}</p>`;
+    const tabName=adminShopTabLabels[adminShopTab]||'ร้านค้า';
+    if(status)status.textContent=`${tabName} ${all.length}${query?` จาก ${counts[adminShopTab]||0}`:''} ร้าน • เลือกแท็บเพื่อดูสถานะอื่น`;
     if(clear)clear.classList.toggle('hidden',!query);
   }
   function adminViewHeader(title,subtitle=''){
@@ -3338,7 +3348,39 @@
     const pending=$('pendingGrid'),all=$('adminAllGrid');
     if(pending&&all){
       const children=Array.from(panel.children);const start=children.indexOf(pending.previousElementSibling);const end=children.indexOf(all);
-      if(start>=0&&end>=start){const wrap=document.createElement('section');wrap.dataset.adminView='shops';wrap.className='admin-shops-view';wrap.innerHTML=adminViewHeader('🏪 ร้านค้า','อนุมัติ แก้ไข ปิดใช้งาน/กู้คืนร้าน และกำหนดสิทธิ์ Delivery')+`<div class="admin-shop-search"><label for="adminShopSearchInput">ค้นหาร้านค้า</label><div class="admin-shop-search-row"><input id="adminShopSearchInput" type="search" autocomplete="off" placeholder="ชื่อร้าน หมวดหมู่ เบอร์โทร ที่อยู่ หรือสถานะ"><button id="adminShopSearchClear" type="button" class="secondary hidden">ล้างคำค้น</button></div><small id="adminShopSearchStatus" class="muted" aria-live="polite"></small></div>`;panel.insertBefore(wrap,children[start]);for(let i=start;i<=end;i++)wrap.appendChild(children[i]);$('adminShopSearchInput')?.addEventListener('input',renderAdminShopLists);$('adminShopSearchClear')?.addEventListener('click',()=>{const input=$('adminShopSearchInput');if(input){input.value='';input.focus();}renderAdminShopLists();});}
+      if(start>=0&&end>=start){
+        const wrap=document.createElement('section');
+        wrap.dataset.adminView='shops';
+        wrap.className='admin-shops-view';
+        wrap.innerHTML=adminViewHeader('🏪 ร้านค้า','เลือกสถานะร้านที่ต้องการจัดการ โดยไม่ต้องแสดงทุกร้านพร้อมกัน')+`
+          <div class="admin-shop-status-tabs" role="tablist" aria-label="สถานะร้านค้า">
+            <button type="button" role="tab" aria-controls="adminAllGrid" aria-selected="true" class="active" data-admin-shop-tab="approved">✅ เปิดใช้งาน <span data-admin-shop-tab-count="approved">0</span></button>
+            <button type="button" role="tab" aria-controls="adminAllGrid" aria-selected="false" data-admin-shop-tab="pending">⏳ รออนุมัติ <span data-admin-shop-tab-count="pending">0</span></button>
+            <button type="button" role="tab" aria-controls="adminAllGrid" aria-selected="false" data-admin-shop-tab="archived">🗃️ ปิดใช้งาน <span data-admin-shop-tab-count="archived">0</span></button>
+            <button type="button" role="tab" aria-controls="adminAllGrid" aria-selected="false" data-admin-shop-tab="rejected">❌ ไม่อนุมัติ <span data-admin-shop-tab-count="rejected">0</span></button>
+          </div>
+          <div class="admin-shop-search"><label for="adminShopSearchInput">ค้นหาร้านค้าในแท็บนี้</label><div class="admin-shop-search-row"><input id="adminShopSearchInput" type="search" autocomplete="off" placeholder="ชื่อร้าน หมวดหมู่ เบอร์โทร หรือที่อยู่"><button id="adminShopSearchClear" type="button" class="secondary hidden">ล้างคำค้น</button></div><small id="adminShopSearchStatus" class="muted" aria-live="polite"></small></div>`;
+        panel.insertBefore(wrap,children[start]);
+        for(let i=start;i<=end;i++)wrap.appendChild(children[i]);
+        // Legacy duplicate headings and pending list are replaced by one tabbed grid.
+        const oldPendingHeading=pending.previousElementSibling;
+        const oldAllDescription=all.previousElementSibling;
+        const oldAllHeading=oldAllDescription?.previousElementSibling;
+        for(const el of [oldPendingHeading,pending,oldAllHeading,oldAllDescription])el?.classList.add('hidden');
+        all.setAttribute('role','tabpanel');
+        wrap.addEventListener('click',ev=>{
+          const btn=ev.target.closest('[data-admin-shop-tab]');
+          if(!btn||!wrap.contains(btn))return;
+          adminShopTab=btn.dataset.adminShopTab;
+          renderAdminShopLists();
+        });
+        $('adminShopSearchInput')?.addEventListener('input',renderAdminShopLists);
+        $('adminShopSearchClear')?.addEventListener('click',()=>{
+          const input=$('adminShopSearchInput');
+          if(input){input.value='';input.focus();}
+          renderAdminShopLists();
+        });
+      }
     }
 
     const reports=document.createElement('section');reports.dataset.adminView='reports';reports.className='admin-review-reports-view';reports.innerHTML=adminViewHeader('🛡️ รายงานรีวิว','ตรวจสอบรีวิวที่ผู้ใช้รายงาน และซ่อนจากสาธารณะเมื่อจำเป็น')+`<div style="display:flex;justify-content:flex-end;margin-bottom:10px"><button type="button" class="secondary" id="adminReviewReportRefreshBtn">↻ รีเฟรช</button></div><div id="adminReviewReportList"><p class="muted">กดรีเฟรชเพื่อโหลดรายงาน</p></div>`;panel.appendChild(reports);$('adminReviewReportRefreshBtn')?.addEventListener('click',loadAdminReviewReports);$('adminReviewReportList')?.addEventListener('click',ev=>{const b=ev.target.closest('[data-review-report-action]');if(b)handleAdminReviewReport(b.dataset.reportId,b.dataset.reviewReportAction);});
