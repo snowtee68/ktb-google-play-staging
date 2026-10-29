@@ -322,16 +322,10 @@
 
   function stopRiderNewJobSound(){
     if(riderSoundRepeatTimer){clearTimeout(riderSoundRepeatTimer);riderSoundRepeatTimer=null;}
-    try{window.MarketReviewAudio?.stopRiderVoice?.();}catch(_e){}
   }
 
   function playRiderNewJobSound(){
     stopRiderNewJobSound();
-    // KTB_REVIEW_STAGING_LOCAL_VOICE_R5: speak when the Staging backend
-    // reports a genuinely NEW waiting Rider job; never send Production FCM.
-    if(window.MarketReviewAudio?.playRiderJobVoice){
-      try{window.MarketReviewAudio.playRiderJobVoice();return;}catch(_e){}
-    }
     playRiderAlertSound();
     // เตือนซ้ำอีก 2 รอบเพื่อให้ได้ยินง่ายขึ้น แต่ไม่วนไม่รู้จบ
     let n=0;
@@ -417,50 +411,102 @@
     return `<div class="rider-job-owned">งานของคุณ · ${esc(riderJobInboxStatusLabel(job.status))}</div>`;
   }
 
-  // Rider item checklist: read-only snapshot from authorized, assigned batches.
-  function riderItemOptionLabels(value){
-    const items=Array.isArray(value)?value:(typeof value==='string'?(()=>{try{return JSON.parse(value)}catch(_){return []}})():[]);
-    return Array.isArray(items)?items.map(x=>typeof x==='string'?x:(x?.value_name||x?.name||x?.label||'')).filter(Boolean):[];
+  // KTB_MAIN_RIDER_ORDER_ITEMS_V1: Rider inside main marketplace app, not /rider/.
+  // Read-only, optional UI; never changes acceptance, delivery status or push.
+  let ktbMainRiderItemsRun=0;
+  function ktbMainRiderItemsCss(){
+    if(document.getElementById('ktb-main-rider-items-css'))return;
+    const style=document.createElement('style');
+    style.id='ktb-main-rider-items-css';
+    style.textContent=`
+      .ktb-main-rider-items{margin:10px 0;border:1px solid #dfe5ea;border-radius:12px;background:#f8fafc;overflow:hidden}
+      .ktb-main-rider-items>summary{cursor:pointer;padding:11px 12px;font-size:14px;font-weight:700;list-style-position:inside}
+      .ktb-main-rider-items>summary small{font-weight:400;color:#667085;margin-left:6px}
+      .ktb-main-rider-items-body{padding:0 10px 10px;max-height:320px;overflow-y:auto}
+      .ktb-main-rider-items-row{display:flex;align-items:center;gap:9px;padding:8px 0;border-top:1px solid #e5e9ed;font-size:13px}
+      .ktb-main-rider-items-img,.ktb-main-rider-items-placeholder{width:40px;height:40px;border-radius:7px;flex:0 0 40px;object-fit:cover;background:#eef2f5}
+      .ktb-main-rider-items-placeholder{display:grid;place-items:center}
+      .ktb-main-rider-items-copy{min-width:0;flex:1;overflow-wrap:anywhere;line-height:1.4}
+      .ktb-main-rider-items-copy small{display:block;color:#667085}
+      .ktb-main-rider-items-qty{font-weight:800;flex:none}
+      .ktb-main-rider-items-shop{font-size:12px;font-weight:800;color:#667085;padding:10px 0 5px}`;
+    document.head.appendChild(style);
   }
-
-  function riderItemsHtml(job){
-    if(!job?.is_mine)return ''; // Never expose order contents before this Rider accepts the job.
-    const items=Array.isArray(job?.rider_items)?job.rider_items:[];
-    if(!items.length)return `<div class="rider-job-section"><strong>📦 รายการสินค้าที่ต้องรับ</strong><div class="muted">ยังไม่มีรายการสินค้าให้ตรวจสอบ กรุณาติดต่อร้านก่อนรับสินค้า</div></div>`;
+  function ktbMainRiderSafeImage(value){
+    if(!value)return '';
+    try{const url=new URL(String(value),location.origin);return url.protocol==='https:'?url.href:''}catch(_e){return ''}
+  }
+  function ktbMainRiderOptionText(value){
+    if(value==null||value==='')return '';
+    let x=value;
+    if(typeof x==='string'){try{x=JSON.parse(x)}catch(_e){return x.slice(0,220)}}
+    if(Array.isArray(x))return x.map(v=>typeof v==='string'?v:(v&&typeof v==='object'?([v.group_name||v.group||v.label||'',v.name||v.value||v.option_name||''].filter(Boolean).join(': ')||JSON.stringify(v)):String(v))).join(', ').slice(0,220);
+    if(x&&typeof x==='object')return Object.entries(x).map(([k,v])=>`${k}: ${typeof v==='object'?JSON.stringify(v):v}`).join(', ').slice(0,220);
+    return String(x).slice(0,220);
+  }
+  function ktbMainRiderItemRowsHtml(items){
     const byShop=new Map();
-    items.forEach(item=>{
-      const shop=String(item.shop_name||'ร้านค้า');
-      if(!byShop.has(shop))byShop.set(shop,[]);
-      byShop.get(shop).push(item);
-    });
-    const groups=[...byShop].map(([shop,rows])=>{
-      const products=rows.map((item,i)=>{
-        const qty=Math.max(0,Number(item.qty)||0);
-        const opt=riderItemOptionLabels(item.options_json);
-        return `<div style="padding:7px 0;border-top:1px solid #e8e8e8">
-          <div style="display:flex;gap:8px;justify-content:space-between"><span>${i+1}. <b>${esc(item.product_name||'สินค้า')}</b></span><b style="white-space:nowrap">× ${qty.toLocaleString('th-TH')}</b></div>
-          ${opt.length?`<small style="display:block;margin-top:3px">ตัวเลือก: ${esc(opt.join(', '))}</small>`:''}
-          ${item.note?`<small style="display:block;margin-top:3px">📝 หมายเหตุ: ${esc(item.note)}</small>`:''}
-        </div>`;
-      }).join('');
-      return `<div class="rider-stop"><b>🏪 ${esc(shop)}</b>${products}</div>`;
-    }).join('');
-    return `<div class="rider-job-section"><strong>📦 รายการสินค้าที่ต้องรับ · ตรวจเช็กกับร้านก่อนกดรับสินค้าครบ</strong>${groups}</div>`;
+    for(const item of items){
+      const key=String(item.shop_id||item.shop_name||'');
+      if(!byShop.has(key))byShop.set(key,{name:item.shop_name||'ร้านค้า',rows:[]});
+      byShop.get(key).rows.push(item);
+    }
+    return [...byShop.values()].map(group=>`<div class="ktb-main-rider-items-shop">🏪 ${esc(group.name)}</div>${group.rows.map(item=>{
+      const product=String(item.product_name||'สินค้า'),src=ktbMainRiderSafeImage(item.image_url);
+      const picture=src?`<a href="${esc(src)}" target="_blank" rel="noopener noreferrer" title="ดูรูปสินค้า"><img class="ktb-main-rider-items-img" src="${esc(src)}" alt="${esc(product)}" loading="lazy"></a>`:'<span class="ktb-main-rider-items-placeholder">📦</span>';
+      const opts=ktbMainRiderOptionText(item.options_json),note=String(item.note||'').slice(0,220);
+      return `<div class="ktb-main-rider-items-row">${picture}<div class="ktb-main-rider-items-copy"><b>${esc(product)}</b>${opts?`<small>ตัวเลือก: ${esc(opts)}</small>`:''}${note?`<small>หมายเหตุ: ${esc(note)}</small>`:''}</div><span class="ktb-main-rider-items-qty">×${Math.max(0,Number(item.qty)||0)}</span></div>`;
+    }).join('')}`).join('');
   }
-
-  // Non-invasive fallback: if the read-only RPC has not been installed, all Rider actions remain usable.
-  async function fillRiderInboxItems(jobs){
-    const rows=Array.isArray(jobs)?jobs:[];
-    const ids=[...new Set(rows.filter(j=>j?.is_mine).map(j=>String(j.batch_id||'')).filter(Boolean))];
-    if(!ids.length)return rows;
+  async function ktbMainRiderAttachItems(jobs){
+    const run=++ktbMainRiderItemsRun;
+    const mine=(Array.isArray(jobs)?jobs:[]).filter(j=>j?.is_mine&&j?.batch_id).slice(0,30);
+    if(!mine.length)return;
+    ktbMainRiderItemsCss();
+    for(const job of mine){
+      const card=document.querySelector(`[data-rider-job-batch="${CSS.escape(String(job.batch_id))}"]`);
+      if(!card)continue;
+      const details=document.createElement('details');
+      details.className='ktb-main-rider-items';
+      details.innerHTML='<summary>📦 รายการสินค้า <small>กำลังตรวจสอบ...</small></summary>';
+      const pickup=card.querySelector('.rider-job-section');
+      if(pickup)pickup.after(details);else card.appendChild(details);
+    }
+    const ids=[...new Set(mine.map(j=>String(j.batch_id)))];
     try{
-      const {data,error}=await db.rpc('market_my_rider_batch_items_v1',{p_batch_ids:ids});
+      const {data,error}=await db.rpc('ktb_market_rider_batch_items',{p_batch_ids:ids});
       if(error)throw error;
-      const byBatch=new Map((Array.isArray(data)?data:[]).map(r=>[String(r.batch_id),Array.isArray(r.items)?r.items:[]]));
-      return rows.map(j=>j?.is_mine?{...j,rider_items:byBatch.get(String(j.batch_id))||[]}:j);
+      if(run!==ktbMainRiderItemsRun)return;
+      const byBatch=new Map();
+      for(const row of Array.isArray(data)?data:[]){
+        const id=String(row.batch_id||'');
+        if(!byBatch.has(id))byBatch.set(id,[]);
+        byBatch.get(id).push(row);
+      }
+      for(const job of mine){
+        const card=document.querySelector(`[data-rider-job-batch="${CSS.escape(String(job.batch_id))}"]`);
+        const panel=card?.querySelector('.ktb-main-rider-items');
+        if(!panel)continue;
+        const list=byBatch.get(String(job.batch_id))||[];
+        if(!list.length){
+          panel.innerHTML='<summary>📦 รายการสินค้า <small>ไม่พบข้อมูลสินค้าเชื่อมกับงาน</small></summary>';
+          continue;
+        }
+        const qty=list.reduce((n,row)=>n+Math.max(0,Number(row.qty)||0),0);
+        panel.innerHTML=`<summary>📦 รายการสินค้า ${list.length} รายการ (${qty} ชิ้น) <small>แตะเพื่อตรวจสอบ</small></summary><div class="ktb-main-rider-items-body"></div>`;
+        panel.addEventListener('toggle',()=>{
+          if(!panel.open)return;
+          const body=panel.querySelector('.ktb-main-rider-items-body');
+          if(body&&!body.dataset.loaded){body.innerHTML=ktbMainRiderItemRowsHtml(list);body.dataset.loaded='1'}
+        });
+      }
     }catch(err){
-      console.warn('Rider item checklist unavailable (existing workflow unchanged):',err?.message||err);
-      return rows;
+      if(run!==ktbMainRiderItemsRun)return;
+      console.warn('Main Rider: load linked market items failed',err?.message||err);
+      for(const job of mine){
+        const panel=document.querySelector(`[data-rider-job-batch="${CSS.escape(String(job.batch_id))}"] .ktb-main-rider-items`);
+        if(panel)panel.innerHTML='<summary>📦 รายการสินค้า <small>โหลดไม่สำเร็จ กรุณาเปิดใหม่</small></summary>';
+      }
     }
   }
 
@@ -502,7 +548,6 @@
       <div class="rider-job-meta">${km?`📏 ${km.toFixed(1)} กม.`:''}${shops.length?` · 🏪 ${shops.length} จุดรับ`:''}</div>
 
       <div class="rider-job-section"><strong>จุดรับสินค้า</strong>${shopHtml}</div>
-      ${riderItemsHtml(job)}
 
       <div class="rider-job-section">
         <strong>จุดส่งลูกค้า</strong>
@@ -574,10 +619,10 @@
         if(job?.is_mine&&job?.delivery_arrived_at)return false;
         return true;
       });
-      const jobsWithItems=await fillRiderInboxItems(jobs);
       syncRiderWaitingJobs(jobs,{notify:true});
-      if(box)box.innerHTML=jobsWithItems.length?jobsWithItems.map(riderJobCard).join(''):'<div class="rider-job-empty">✅ ตอนนี้ยังไม่มีงานใหม่หรืองานที่ต้องดำเนินการ</div>';
-      return jobsWithItems;
+      if(box)box.innerHTML=jobs.length?jobs.map(riderJobCard).join(''):'<div class="rider-job-empty">✅ ตอนนี้ยังไม่มีงานใหม่หรืองานที่ต้องดำเนินการ</div>';
+      void ktbMainRiderAttachItems(jobs);
+      return jobs;
     }catch(err){
       if(box)box.innerHTML=`<p class="muted">โหลดงาน Rider ไม่สำเร็จ: ${esc(err?.message||err)}</p>`;
       return [];
@@ -659,9 +704,7 @@
   }
 
   function notifyRiderNewJob(){
-    if(window.MarketReviewAudio?.playRiderJobVoice){
-      try{window.MarketReviewAudio.playRiderJobVoice();}catch(_e){playRiderAlertSound();}
-    }else playRiderAlertSound();
+    playRiderAlertSound();
     try{
       if('Notification' in window && Notification.permission==='granted'){
         new Notification('🛵 มีงาน Rider ใหม่',{body:'มีงาน Delivery ใหม่รอรับ กด “งาน Rider” เพื่อดูรายละเอียด',tag:'market-rider-new-job'});
@@ -703,7 +746,7 @@
       if(!riderWaitingJobPollTimer){
         riderWaitingJobPollTimer=setInterval(()=>{
           if(document.visibilityState==='visible'&&myRiderApplication?.status==='approved'&&myRiderOnline)loadRiderJobInbox({quiet:true});
-        },20000);
+        },180000);
       }
     }catch(err){console.warn('rider realtime skipped',err);}
   }
@@ -2571,7 +2614,7 @@
     const state=openState(s);
 
     if(dashboard){
-      const status=`<span class="status-pill ${s.status==='approved'?'approved':''}">${s.status==='approved'?'เผยแพร่แล้ว':s.status==='rejected'?'ไม่อนุมัติ':'รอตรวจสอบ'}</span>`;
+      const status=`<span class="status-pill ${s.status==='approved'?'approved':''}">${s.status==='approved'?'เผยแพร่แล้ว':s.status==='archived'?'ปิดใช้งาน (กู้คืนได้)':s.status==='rejected'?'ไม่อนุมัติ':'รอตรวจสอบ'}</span>`;
       return `<article class="card" data-id="${esc(s.id)}">
         <div class="card-img">${cover}<span class="tag">${esc(category)}</span></div>
         <div class="card-body">
@@ -2579,7 +2622,7 @@
           <div class="rating-line"><span>${stars(rating.average)}</span><b>${rating.count?rating.average.toFixed(1):'ใหม่'}</b><small>${rating.count?`(${rating.count})`:'ยังไม่มีรีวิว'}</small></div>
           <p>${esc(s.description||'ร้านค้าในตลาดกระทุ่มแบน')}</p>
           <div class="community-actions"><button data-action="details">ดูรายละเอียด</button><button data-action="seller-reviews">💬 รีวิวลูกค้า</button>${favoriteButton(s.id)}</div>
-          <div class="admin-actions"><button data-action="edit">แก้ไขร้าน</button><button class="manage-promo-btn" data-action="manage-promotions">⚙️ จัดการโปรโมชั่น</button><button data-action="promotion">+ เพิ่มโปรโมชั่น</button>${profile?.role==='admin'&&s.status!=='approved'?'<button data-action="approve">อนุมัติ</button>':''}${profile?.role==='admin'?`${s.status==='approved'&&s.delivery_access_known?`<button class="${s.delivery_access_enabled?'delivery-access-on':'delivery-access-off'}" data-action="admin-delivery-toggle" data-enabled="${s.delivery_access_enabled?'true':'false'}">${s.delivery_access_enabled?'🟢 Delivery เปิด':'⚪ Delivery ปิด'}</button>`:''}<button data-action="feature">${s.featured?'ยกเลิกแนะนำ':'แนะนำร้าน'}</button><button data-action="reject">ไม่อนุมัติ</button>`:''}</div>
+          <div class="admin-actions"><button data-action="edit">แก้ไขร้าน</button><button class="manage-promo-btn" data-action="manage-promotions">⚙️ จัดการโปรโมชั่น</button><button data-action="promotion">+ เพิ่มโปรโมชั่น</button>${profile?.role==='admin'&&['pending','rejected'].includes(s.status)?'<button data-action="approve">อนุมัติ</button>':''}${profile?.role==='admin'?`${s.status==='approved'&&s.delivery_access_known?`<button class="${s.delivery_access_enabled?'delivery-access-on':'delivery-access-off'}" data-action="admin-delivery-toggle" data-enabled="${s.delivery_access_enabled?'true':'false'}">${s.delivery_access_enabled?'🟢 Delivery เปิด':'⚪ Delivery ปิด'}</button>`:''}<button data-action="feature">${s.featured?'ยกเลิกแนะนำ':'แนะนำร้าน'}</button>${s.status==='approved'?'<button type="button" class="danger" data-action="archive-shop">🗃️ ปิดใช้งานร้าน</button>':''}${s.status==='archived'?'<button type="button" class="secondary" data-action="restore-shop">↩️ กู้คืนร้าน</button>':''}${s.status==='pending'?'<button data-action="reject">ไม่อนุมัติ</button>':''}`:''}</div>
         </div>
       </article>`;
     }
@@ -3234,7 +3277,7 @@
   let adminAllShops=[];
   function adminShopMatchesSearch(shop,query){
     if(!query)return true;
-    const statusText=({pending:'รออนุมัติ pending',approved:'อนุมัติแล้ว approved',rejected:'ไม่อนุมัติ rejected'})[shop?.status]||shop?.status||'';
+    const statusText=({pending:'รออนุมัติ pending',approved:'อนุมัติแล้ว approved',rejected:'ไม่อนุมัติ rejected',archived:'ปิดใช้งาน กู้คืน archived'})[shop?.status]||shop?.status||'';
     const searchable=[shop?.name,shop?.category?.name,shop?.phone,shop?.address,shop?.landmark,shop?.zone,statusText]
       .filter(Boolean).join(' ').toLocaleLowerCase('th');
     return searchable.includes(query);
@@ -3247,7 +3290,8 @@
     const pendingGrid=$('pendingGrid'),adminAllGrid=$('adminAllGrid'),status=$('adminShopSearchStatus'),clear=$('adminShopSearchClear');
     if(pendingGrid)pendingGrid.innerHTML=pending.length?pending.map(s=>shopCard(s,true)).join(''):`<p>${query?'ไม่พบร้านรออนุมัติที่ตรงกับคำค้น':'ไม่มีร้านรออนุมัติ'}</p>`;
     if(adminAllGrid)adminAllGrid.innerHTML=all.length?all.map(s=>shopCard(s,true)).join(''):`<p>${query?'ไม่พบร้านค้าที่ตรงกับคำค้น':'ยังไม่มีร้านค้า'}</p>`;
-    if(status)status.textContent=query?`พบ ${all.length} ร้าน จากทั้งหมด ${adminAllShops.length} ร้าน${pending.length?` • รออนุมัติ ${pending.length} ร้าน`:''}`:`ร้านค้าทั้งหมด ${adminAllShops.length} ร้าน • รออนุมัติ ${adminPendingShops.length} ร้าน`;
+    const archivedCount=adminAllShops.filter(shop=>shop.status==='archived').length;
+    if(status)status.textContent=query?`พบ ${all.length} ร้าน จากทั้งหมด ${adminAllShops.length} ร้าน${pending.length?` • รออนุมัติ ${pending.length} ร้าน`:''}`:`ร้านค้าทั้งหมด ${adminAllShops.length} ร้าน • รออนุมัติ ${adminPendingShops.length} ร้าน • ปิดใช้งาน ${archivedCount} ร้าน`;
     if(clear)clear.classList.toggle('hidden',!query);
   }
   function adminViewHeader(title,subtitle=''){
@@ -3294,7 +3338,7 @@
     const pending=$('pendingGrid'),all=$('adminAllGrid');
     if(pending&&all){
       const children=Array.from(panel.children);const start=children.indexOf(pending.previousElementSibling);const end=children.indexOf(all);
-      if(start>=0&&end>=start){const wrap=document.createElement('section');wrap.dataset.adminView='shops';wrap.className='admin-shops-view';wrap.innerHTML=adminViewHeader('🏪 ร้านค้า','อนุมัติ แก้ไข และกำหนดสิทธิ์ Delivery รายร้าน')+`<div class="admin-shop-search"><label for="adminShopSearchInput">ค้นหาร้านค้า</label><div class="admin-shop-search-row"><input id="adminShopSearchInput" type="search" autocomplete="off" placeholder="ชื่อร้าน หมวดหมู่ เบอร์โทร ที่อยู่ หรือสถานะ"><button id="adminShopSearchClear" type="button" class="secondary hidden">ล้างคำค้น</button></div><small id="adminShopSearchStatus" class="muted" aria-live="polite"></small></div>`;panel.insertBefore(wrap,children[start]);for(let i=start;i<=end;i++)wrap.appendChild(children[i]);$('adminShopSearchInput')?.addEventListener('input',renderAdminShopLists);$('adminShopSearchClear')?.addEventListener('click',()=>{const input=$('adminShopSearchInput');if(input){input.value='';input.focus();}renderAdminShopLists();});}
+      if(start>=0&&end>=start){const wrap=document.createElement('section');wrap.dataset.adminView='shops';wrap.className='admin-shops-view';wrap.innerHTML=adminViewHeader('🏪 ร้านค้า','อนุมัติ แก้ไข ปิดใช้งาน/กู้คืนร้าน และกำหนดสิทธิ์ Delivery')+`<div class="admin-shop-search"><label for="adminShopSearchInput">ค้นหาร้านค้า</label><div class="admin-shop-search-row"><input id="adminShopSearchInput" type="search" autocomplete="off" placeholder="ชื่อร้าน หมวดหมู่ เบอร์โทร ที่อยู่ หรือสถานะ"><button id="adminShopSearchClear" type="button" class="secondary hidden">ล้างคำค้น</button></div><small id="adminShopSearchStatus" class="muted" aria-live="polite"></small></div>`;panel.insertBefore(wrap,children[start]);for(let i=start;i<=end;i++)wrap.appendChild(children[i]);$('adminShopSearchInput')?.addEventListener('input',renderAdminShopLists);$('adminShopSearchClear')?.addEventListener('click',()=>{const input=$('adminShopSearchInput');if(input){input.value='';input.focus();}renderAdminShopLists();});}
     }
 
     const reports=document.createElement('section');reports.dataset.adminView='reports';reports.className='admin-review-reports-view';reports.innerHTML=adminViewHeader('🛡️ รายงานรีวิว','ตรวจสอบรีวิวที่ผู้ใช้รายงาน และซ่อนจากสาธารณะเมื่อจำเป็น')+`<div style="display:flex;justify-content:flex-end;margin-bottom:10px"><button type="button" class="secondary" id="adminReviewReportRefreshBtn">↻ รีเฟรช</button></div><div id="adminReviewReportList"><p class="muted">กดรีเฟรชเพื่อโหลดรายงาน</p></div>`;panel.appendChild(reports);$('adminReviewReportRefreshBtn')?.addEventListener('click',loadAdminReviewReports);$('adminReviewReportList')?.addEventListener('click',ev=>{const b=ev.target.closest('[data-review-report-action]');if(b)handleAdminReviewReport(b.dataset.reportId,b.dataset.reviewReportAction);});
@@ -3436,6 +3480,37 @@
     showNotice(`${label}สำเร็จ: ${data.name}`);
     await loadShopIndex();
       await Promise.all([loadDashboard(),loadPublicShops({reset:true})]);
+  }
+
+  // Admin-only, reversible shop archival. The RPC checks the role and active orders
+  // on the server; this UI never deletes the shop, products, reviews or order history.
+  async function setAdminShopArchived(id,archived,button){
+    if(!db||!session||profile?.role!=='admin')return alert('เฉพาะ Admin เท่านั้น');
+    const shop=adminAllShops.find(s=>String(s.id)===String(id));
+    if(!shop)return alert('ไม่พบร้านในรายการ Admin กรุณารีเฟรช');
+    if(archived&&shop.status!=='approved')return alert('ปิดใช้งานได้เฉพาะร้านที่เผยแพร่แล้ว');
+    if(!archived&&shop.status!=='archived')return alert('ร้านนี้ไม่ได้อยู่ในสถานะปิดใช้งาน');
+    const message=archived
+      ?`ยืนยันปิดใช้งานร้าน “${shop.name}” หรือไม่?\n\nร้านจะหายจากหน้าลูกค้าและไม่สามารถรับออเดอร์ใหม่ แต่สินค้า รีวิว และออเดอร์เก่าจะยังอยู่ทั้งหมด\n\nสามารถกู้คืนร้านได้ภายหลัง`
+      :`ยืนยันกู้คืนร้าน “${shop.name}” หรือไม่?\n\nร้านจะกลับมาแสดงต่อสาธารณะอีกครั้ง`;
+    if(!confirm(message))return;
+    const previousLabel=button?.textContent;
+    if(button){button.disabled=true;button.textContent='กำลังบันทึก...';}
+    try{
+      const {data,error}=await db.rpc('market_admin_set_shop_archived',{
+        p_shop_id:id,p_archived:archived
+      });
+      if(error)throw error;
+      const targetStatus=archived?'archived':'approved';
+      if(data?.ok!==true||data?.shop_status!==targetStatus)throw new Error('ระบบไม่ยืนยันสถานะร้าน กรุณาตรวจสอบอีกครั้ง');
+      showNotice(`${archived?'ปิดใช้งาน':'กู้คืน'}ร้าน “${shop.name}” เรียบร้อยแล้ว`);
+      await loadShopIndex();
+      await Promise.all([loadDashboard(),loadPublicShops({reset:true})]);
+    }catch(err){
+      alert(`ไม่สามารถ${archived?'ปิดใช้งาน':'กู้คืน'}ร้านได้: ${friendlyAuthError(err?.message||String(err))}`);
+    }finally{
+      if(button){button.disabled=false;button.textContent=previousLabel;}
+    }
   }
 
 
@@ -3666,9 +3741,7 @@
         const signupEmail=method==='phone'?phoneLoginEmail(phone):email;
         const options=method==='phone'
           ? {data:{signup_method:'phone_alias',phone_local:'0'+phone.slice(3),phone_e164:phone,display_name:displayName}}
-          : {
-emailRedirectTo:`${window.location.origin}${window.location.pathname}`
-,data:{display_name:displayName,terms_version:'1.0',terms_accepted_at:new Date().toISOString()}};
+          : {emailRedirectTo:window.location.origin,data:{display_name:displayName,terms_version:'1.0',terms_accepted_at:new Date().toISOString()}};
         const {data,error}=await db.auth.signUp({email:signupEmail,password,options});
         if(error)throw error;
         if(data.session){
@@ -3873,6 +3946,8 @@ emailRedirectTo:`${window.location.origin}${window.location.pathname}`
       if(!action||!shopId)return;
       if(action==='favorite'){toggleFavorite(shopId);return;}
       if(action==='admin-delivery-toggle'){adminToggleDeliveryAccess(shopId,ev.target.dataset.enabled==='true');return;}
+      if(action==='archive-shop'){setAdminShopArchived(shopId,true,ev.target);return;}
+      if(action==='restore-shop'){setAdminShopArchived(shopId,false,ev.target);return;}
       if(action==='edit')editShop(shopId);
       if(action==='approve')setStatus(shopId,'approved');
       if(action==='reject')setStatus(shopId,'rejected');
@@ -3920,8 +3995,6 @@ emailRedirectTo:`${window.location.origin}${window.location.pathname}`
       e.preventDefault();
       if(window.MarketNativeAlert?.testRiderAlert){
         window.MarketNativeAlert.testRiderAlert();
-      }else if(window.MarketReviewAudio?.playRiderJobVoice){
-        window.MarketReviewAudio.playRiderJobVoice();
       }else{
         armRiderAlertAudio();playRiderAlertSound();
       }
@@ -3930,7 +4003,7 @@ emailRedirectTo:`${window.location.origin}${window.location.pathname}`
     if(e.target.closest?.('#stopRiderNativeAudioBtn')){
       e.preventDefault();
       try{window.marketNativeAudioTest?.stop?.();window.MarketNativeAlert?.stopRiderAlert?.();}catch(_e){}
-      stopRiderNewJobSound();
+      stopRiderSoundRepeat?.();
       return;
     }
     const accept=e.target.closest?.('[data-rider-accept-batch]');
