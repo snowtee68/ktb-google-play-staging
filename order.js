@@ -239,13 +239,7 @@
     if(orderNotifyAudioArmed)return;orderNotifyAudioArmed=true;
     try{const C=window.AudioContext||window.webkitAudioContext;if(C){const c=new C();const o=c.createOscillator(),g=c.createGain();g.gain.value=0.0001;o.connect(g);g.connect(c.destination);o.start();o.stop(c.currentTime+.01);c.resume?.();window.__marketOrderAudioContext=c;}}catch(_){}
   }
-  function playOrderNotificationSound(sellerAlert=false){
-    // KTB_REVIEW_STAGING_LOCAL_VOICE_R5: a real Staging seller-order event
-    // plays the SAME pre-recorded Thai voice as the Android Production app.
-    // Customer status updates keep their short, non-urgent web chime.
-    if(sellerAlert&&window.MarketReviewAudio?.playSellerOrderVoice){
-      try{window.MarketReviewAudio.playSellerOrderVoice();return;}catch(_e){}
-    }
+  function playOrderNotificationSound(){
     if(!orderNotifyAudioArmed)return;
     try{
       const C=window.AudioContext||window.webkitAudioContext,c=window.__marketOrderAudioContext||new C();window.__marketOrderAudioContext=c;c.resume?.();
@@ -264,7 +258,6 @@
   }
   function stopOrderSoundRepeat(){
     if(orderNotifySoundRepeatTimer){clearInterval(orderNotifySoundRepeatTimer);orderNotifySoundRepeatTimer=null}
-    try{window.MarketReviewAudio?.stopSellerVoice?.();}catch(_e){}
   }
   function startOrderSoundRepeat(){
     stopOrderSoundRepeat();
@@ -272,7 +265,7 @@
     // this function, so buyers are not disturbed by a repeating sound.
     orderNotifySoundRepeatTimer=setInterval(()=>{
       if(document.visibilityState==='visible'&&Number(orderNotifyState.activeSellerOrders||0)>0){
-        playOrderNotificationSound(true);
+        playOrderNotificationSound();
       }
     },10000);
   }
@@ -290,11 +283,8 @@
     orderNotifyState.unread=Math.min(999,Number(orderNotifyState.unread||0)+Math.max(1,count));saveOrderNotifyState();renderOrderNotifyBadge();
     orderNotifyState.bannerTarget=target||null;saveOrderNotifyState();
     // Every real event sounds once; seller action events may also start the alarm loop.
-    // Start/replace the repeat timer BEFORE the native first phrase:
-    // startOrderSoundRepeat() clears the previous sound and must not cut
-    // the new Thai voice off after its opening syllable.
+    playOrderNotificationSound();
     if(repeatSellerSound)startOrderSoundRepeat();
-    playOrderNotificationSound(repeatSellerSound);
   }
   function markNotificationAreaViewed(){
     orderNotifyState.unread=0;saveOrderNotifyState();renderOrderNotifyBadge();stopOrderSoundRepeat();document.getElementById('orderNotifyBanner')?.classList.remove('show');
@@ -471,7 +461,7 @@
       if(!relevant)return;
 
       const status=String(batch.status||'');
-      // KTB_STAGING_SELLER_READY_LIVE_R3: the seller screen may be open while Rider picks up.
+      // KTB_PRODUCTION_SELLER_READY_LIVE_R3: the seller screen may be open while Rider picks up.
       // Hide only linked orders' stale Ready buttons, then refresh seller data via the
       // existing debounced Realtime refresh. No additional sound or push is sent.
       const riderAlreadyPickedUp=!!batch.picked_up_at||!!batch.delivering_at||
@@ -552,6 +542,11 @@
   }
 
   function wire(){
+    // A seller who leaves an order panel open must not keep a working call link
+    // past the two-hour post-completion contact window.
+    setInterval(()=>{if(document.visibilityState==='visible')refreshSellerContactExpiry();},30000);
+    window.addEventListener('focus',refreshSellerContactExpiry);
+    document.addEventListener('visibilitychange',()=>{if(document.visibilityState==='visible')refreshSellerContactExpiry();});
     document.addEventListener('pointerdown',armOrderNotificationAudio,{once:true,capture:true});
     document.addEventListener('keydown',armOrderNotificationAudio,{once:true,capture:true});
     document.addEventListener('click',e=>{
@@ -655,7 +650,6 @@ if(e.target.closest('#showDeliveryFareInfoBtn'))return showDeliveryFareInfo(fals
       if(e.target.closest('#submitRefundBtn'))return submitRefund();
       if(e.target.closest('#enableOrderPushBtn'))return enableOrderPush();
       if(e.target.closest('#disableOrderPushBtn'))return disableOrderPush();
-      if(e.target.closest('#testOrderPushBtn'))return testOrderPush();
       if(e.target.closest('#enableSellerPushBtn'))return enableSellerPush();
       if(e.target.closest('#disableSellerPushBtn'))return disableSellerPush();
       if(e.target.closest('#testSellerPushBtn'))return testSellerPush();
@@ -663,12 +657,11 @@ if(e.target.closest('#showDeliveryFareInfoBtn'))return showDeliveryFareInfo(fals
       if(e.target.closest('#testOrderNativePushBtn'))return testNativePush('customer');
       if(e.target.closest('#testSellerNativeAudioBtn')){
         if(window.MarketNativeAlert?.testOrderAlert)window.MarketNativeAlert.testOrderAlert();
-        else if(window.MarketReviewAudio?.playSellerOrderVoice)window.MarketReviewAudio.playSellerOrderVoice();
         else{armOrderNotificationAudio();playOrderNotificationSound();}
         return;
       }
       if(e.target.closest('#stopSellerNativeAudioBtn')){
-        try{if(window.MarketNativeAlert?.stopAlert)window.MarketNativeAlert.stopAlert();else if(window.MarketReviewAudio?.stopSellerVoice)window.MarketReviewAudio.stopSellerVoice();else window.MarketNativeAlert?.stopOrderAlert?.();}catch(_e){}
+        try{if(window.MarketNativeAlert?.stopAlert)window.MarketNativeAlert.stopAlert();else window.MarketNativeAlert?.stopOrderAlert?.();}catch(_e){}
         stopOrderSoundRepeat();
         return;
       }
@@ -684,7 +677,28 @@ if(e.target.closest('#showDeliveryFareInfoBtn'))return showDeliveryFareInfo(fals
       if(e.target.closest('#customerLoadMoreOrders')){customerOrderPage++;return renderHubTab('customer');}
       if(e.target.closest('#sellerLoadMoreOrders')){sellerOrderPage++;const sid=document.getElementById('sellerShopId')?.value;return sid?(document.getElementById('sellerOrdersOnly')?openSellerOrders(sid):openSellerShop(sid)):null;}
     });
-    document.addEventListener('input',e=>{const el=e.target.closest('[data-draft-field]');if(el)draftFieldChanged(el);const q=e.target.closest('#orderSearchInput');if(q){orderSearchTerm=q.value||'';customerOrderPage=1;sellerOrderPage=1;clearTimeout(window.__orderSearchTimer);window.__orderSearchTimer=setTimeout(()=>{const sid=document.getElementById('sellerShopId')?.value;if(sid)(document.getElementById('sellerOrdersOnly')?openSellerOrders(sid):openSellerShop(sid));else renderHubTab('customer');},250);}});
+    // KTB_ORDER_SEARCH_ENTER_ONLY_20261101:
+    // Do not replace an order list while the user is still typing.
+    // One delegated Enter handler serves both customer and seller order screens.
+    document.addEventListener('input',e=>{
+      const el=e.target.closest('[data-draft-field]');
+      if(el)draftFieldChanged(el);
+    });
+    document.addEventListener('keydown',e=>{
+      const q=e.target.closest?.('#orderSearchInput');
+      if(!q||e.key!=='Enter'||e.isComposing||e.keyCode===229)return;
+      e.preventDefault();
+      orderSearchTerm=String(q.value||'').trim();
+      customerOrderPage=1;
+      sellerOrderPage=1;
+      const sid=document.getElementById('sellerShopId')?.value;
+      if(sid){
+        if(document.getElementById('sellerOrdersOnly'))openSellerOrders(sid);
+        else openSellerShop(sid);
+      }else{
+        renderHubTab('customer');
+      }
+    });
     document.addEventListener('change',e=>{if(e.target.id==='coProvince')return provinceChanged();if(e.target.id==='coDistrict')return districtChanged();if(e.target.id==='coSubdistrict')return subdistrictChanged();const el=e.target.closest('[data-draft-field]');if(el)draftFieldChanged(el);if(e.target.closest('[data-option-value]'))updateCustomProductTotal();const df=e.target.closest('#orderDateFilter');if(df){orderDateFilter=df.value;customerOrderPage=1;sellerOrderPage=1;const sid=document.getElementById('sellerShopId')?.value;if(sid)(document.getElementById('sellerOrdersOnly')?openSellerOrders(sid):openSellerShop(sid));else renderHubTab('customer');}});
   }
   function openModal(html,wide=false){
@@ -1462,7 +1476,7 @@ if(e.target.closest('#showDeliveryFareInfoBtn'))return showDeliveryFareInfo(fals
       const sub=sync?.ok?sync.sub:null;
       if(sub){
         st.innerHTML='✅ <b>อุปกรณ์นี้พร้อมรับ Push Notification</b><br><small>สามารถปิดเว็บหรือพักหน้าจอได้ ระบบจะใช้การแจ้งเตือนของอุปกรณ์</small>';
-        if(on)on.style.display='none';if(off)off.style.display='';if(test)test.style.display='';
+        if(on)on.style.display='none';if(off)off.style.display='';if(test)test.style.display='none';
       }else{
         st.textContent=perm==='denied'?'❌ Browser ปิดสิทธิ์แจ้งเตือน กรุณาเปิดจากการตั้งค่าของเว็บไซต์':'ยังไม่ได้เปิด Push Notification บนอุปกรณ์นี้';
         if(on)on.style.display='';if(off)off.style.display='none';if(test)test.style.display='none';
@@ -1517,18 +1531,6 @@ if(e.target.closest('#showDeliveryFareInfoBtn'))return showDeliveryFareInfo(fals
       const sub=await getOrderPushSubscription();if(sub){await db.from('market_push_subscriptions').delete().eq('user_id',session.user.id).eq('endpoint',sub.endpoint);await sub.unsubscribe();}
       await refreshOrderPushUI();
     }catch(err){alert('ปิด Push Notification ไม่สำเร็จ: '+(err?.message||err))}
-    finally{if(btn){btn.disabled=false;btn.textContent=old;}}
-  }
-  async function testOrderPush(){
-    if(!session)return requireLogin();
-    const btn=document.getElementById('testOrderPushBtn'),old=btn?.textContent||'🔔 ส่งแจ้งเตือนทดสอบ';
-    if(btn){btn.disabled=true;btn.textContent='⏳ กำลังส่งทดสอบ...';}
-    try{
-      const {data,error}=await db.functions.invoke('send-order-push',{body:{event:'test_push'}});
-      if(error)throw error;
-      if(!data?.sent)throw new Error('ยังไม่พบอุปกรณ์ที่รับ Push ได้');
-      alert(`ส่ง Push ทดสอบแล้ว ${data.sent} อุปกรณ์`);
-    }catch(err){alert('ส่ง Push ทดสอบไม่สำเร็จ: '+(err?.message||err))}
     finally{if(btn){btn.disabled=false;btn.textContent=old;}}
   }
 
@@ -1805,7 +1807,7 @@ if(e.target.closest('#showDeliveryFareInfoBtn'))return showDeliveryFareInfo(fals
     if(!session)return requireLogin();
     // Strict role separation: buyer screen never renders seller controls.
     if(tab==='seller')return openSellerOrdersFromNav();
-    openModal(`<h2 class="mo-title">🛒 ออเดอร์ที่ฉันสั่งซื้อ</h2><div id="orderPushSettings" class="payment-card"><b>🔔 การแจ้งเตือนบนมือถือ</b><div class="mo-muted" id="orderPushStatus">กำลังตรวจสอบ...</div><div class="mo-actions"><button id="enableOrderPushBtn" class="mo-primary">เปิดการแจ้งเตือนบนมือถือ</button><button id="disableOrderPushBtn" class="mo-secondary" style="display:none">ปิดการแจ้งเตือนเครื่องนี้</button><button id="testOrderPushBtn" class="mo-secondary" style="display:none">🔔 ส่งแจ้งเตือนทดสอบ</button><button id="testOrderNativePushBtn" class="mo-primary" style="display:none">📲 ทดสอบ Native Push จริง</button></div></div><div id="hubContent">กำลังโหลด...</div>`,true);await refreshOrderPushUI();await renderCustomerHub(document.getElementById('hubContent'));
+    openModal(`<h2 class="mo-title">🛒 ออเดอร์ที่ฉันสั่งซื้อ</h2><div id="orderPushSettings" class="payment-card"><b>🔔 การแจ้งเตือนบนมือถือ</b><div class="mo-muted" id="orderPushStatus">กำลังตรวจสอบ...</div><div class="mo-actions"><button id="enableOrderPushBtn" class="mo-primary">เปิดการแจ้งเตือนบนมือถือ</button><button id="disableOrderPushBtn" class="mo-secondary" style="display:none">ปิดการแจ้งเตือนเครื่องนี้</button><button id="testOrderNativePushBtn" class="mo-primary" style="display:none">📲 ทดสอบ Native Push จริง</button></div></div><div id="hubContent">กำลังโหลด...</div>`,true);await refreshOrderPushUI();await renderCustomerHub(document.getElementById('hubContent'));
   }
   async function renderHubTab(tab){const box=document.getElementById('hubContent');if(!box)return;if(tab==='seller')return openSellerOrdersFromNav();return renderCustomerHub(box);}
   async function guideCustomerToGroup(groupId,message=''){
@@ -1921,7 +1923,7 @@ if(e.target.closest('#showDeliveryFareInfoBtn'))return showDeliveryFareInfo(fals
   }
   function orderSearchMatchesGroup(g){
     const q=String(orderSearchTerm||'').trim().toLowerCase();if(!q)return true;
-    const text=[g.id,...(g.orders||[]).flatMap(o=>[o.id,o.shop?.name,o.shop?.phone,o.rejection_reason])].filter(Boolean).join(' ').toLowerCase();
+    const text=[g.id,sharedOrderRef(g.id),...(g.orders||[]).flatMap(o=>[o.id,sharedOrderRef(o.id),o.shop?.name,o.shop?.phone,o.rejection_reason])].filter(Boolean).join(' ').toLowerCase();
     return text.includes(q);
   }
   function orderTabsToolbar(type,buckets){
@@ -1933,7 +1935,7 @@ if(e.target.closest('#showDeliveryFareInfoBtn'))return showDeliveryFareInfo(fals
     const active=isSeller?sellerOrderTab:customerOrderTab,attr=isSeller?'data-seller-order-tab':'data-customer-order-tab';
     return `<div class="order-tabs-sticky" data-order-ui-version="${ORDER_UI_VERSION}">
       <div class="order-tab-strip">${tabs.map(([k,l])=>`<button type="button" ${attr}="${k}" class="${active===k?'active':''}"><span class="order-tab-label">${l}</span><span class="order-tab-count">${buckets[k]?.length||0}</span></button>`).join('')}</div>
-      <div class="order-filter-row"><input id="orderSearchInput" value="${esc(orderSearchTerm)}" placeholder="ค้นหา Order / ชื่อ / เบอร์"><select id="orderDateFilter"><option value="today" ${orderDateFilter==='today'?'selected':''}>วันนี้</option><option value="yesterday" ${orderDateFilter==='yesterday'?'selected':''}>เมื่อวาน</option><option value="7d" ${orderDateFilter==='7d'?'selected':''}>7 วัน</option><option value="all" ${orderDateFilter==='all'?'selected':''}>ทั้งหมด</option></select></div>
+      <div class="order-filter-row"><input id="orderSearchInput" type="search" enterkeyhint="search" autocomplete="off" value="${esc(orderSearchTerm)}" placeholder="พิมพ์แล้วกด Enter เพื่อค้นหา" aria-label="ค้นหาเลขออเดอร์ ชื่อ หรือเบอร์โทร กด Enter เพื่อค้นหา"><select id="orderDateFilter"><option value="today" ${orderDateFilter==='today'?'selected':''}>วันนี้</option><option value="yesterday" ${orderDateFilter==='yesterday'?'selected':''}>เมื่อวาน</option><option value="7d" ${orderDateFilter==='7d'?'selected':''}>7 วัน</option><option value="all" ${orderDateFilter==='all'?'selected':''}>ทั้งหมด</option></select></div>
       <div class="mo-muted order-ui-version">UI v${ORDER_UI_VERSION}</div>
     </div>`;
   }
@@ -2134,7 +2136,10 @@ if(e.target.closest('#showDeliveryFareInfoBtn'))return showDeliveryFareInfo(fals
   }
   function sellerOrderSearchMatches(o){
     const q=String(orderSearchTerm||'').trim().toLowerCase();if(!q)return true;
-    const text=[o.id,o.group?.customer_name,o.group?.customer_phone,o.rejection_reason].filter(Boolean).join(' ').toLowerCase();
+    // Include the displayed group/order reference, not only the internal shop-order UUID.
+    const groupId=o.group?.id||o.group_id;
+    const privacy=sellerCustomerPrivacy(o);
+    const text=[groupId,sharedOrderRef(groupId),o.id,sharedOrderRef(o.id),...(privacy.canContact?[o.group?.customer_name,o.group?.customer_phone]:[]),o.rejection_reason].filter(Boolean).join(' ').toLowerCase();
     return text.includes(q);
   }
   function seenOrderKey(){return `market_seen_orders_${session?.user?.id||'guest'}`}
@@ -2189,21 +2194,45 @@ if(e.target.closest('#showDeliveryFareInfoBtn'))return showDeliveryFareInfo(fals
     const label=done?'ส่งสำเร็จ':arrived?'Rider ส่งมอบแล้ว · ระบบปิดงานภายใน 1 ชั่วโมง':deliveryBatchStatusText(batch.status);
     return `<div class="delivery-track"><b>🛵 ${esc(label)}</b>${batch.rider_name||phone?`<div class="rider-contact"><b>Rider: ${esc(batch.rider_name||'ไม่ระบุชื่อ')}</b>${phone?` · ${esc(phone)} <a href="tel:${esc(phone)}">📞 โทรหา Rider</a>`:''}</div>`:`<div class="mo-muted">รอ Rider รับงาน</div>`}${batch.delivery_fee?`<div class="mo-muted">ค่าส่งประมาณ ${money(batch.delivery_fee)} บาท${batch.distance_km?` · ${Number(batch.distance_km).toFixed(1)} กม.`:''}</div>`:''}${batch.accepted_at?`<div class="mo-muted">รับงาน ${new Date(batch.accepted_at).toLocaleString('th-TH')}</div>`:''}${batch.delivery_arrived_at?`<div class="mo-muted">ถึงปลายทาง ${new Date(batch.delivery_arrived_at).toLocaleString('th-TH')}</div>`:''}${batch.customer_confirmed_at?`<div class="mo-muted">ลูกค้ายืนยันรับ ${new Date(batch.customer_confirmed_at).toLocaleString('th-TH')}</div>`:''}${issue?`<div class="warning-banner">⚠️ ลูกค้าแจ้งปัญหา: ${esc(batch.delivery_issue_note||'')}</div>`:''}${batch.proof_path&&!batch.proof_deleted_at?`<div class="mo-actions"><button class="mo-secondary" data-view-delivery-proof="${batch.id}">📷 ดูหลักฐานส่งมอบ</button></div>`:batch.proof_deleted_at?`<div class="mo-muted">📷 หลักฐานถูกลบตามนโยบายแล้ว</div>`:''}</div>`;
   }
+  // KTB_PRIVACY_SELLER_20261101: hide delivery address immediately on terminal
+  // status; retain customer phone for up to two hours after a confirmed finish.
+  // This is a UI safeguard only. Supabase SELECT/RPC must also redact these
+  // fields server-side for privacy against direct API access.
+  function sellerCustomerPrivacy(o,now=Date.now()){
+    const g=o.group||{};
+    const linked=(g.batches||[]).filter(b=>(b.batch_orders||[]).some(x=>String(x.order_id)===String(o.id)));
+    const cancelled=o.status==='cancelled'||g.status==='cancelled'||(linked.length>0&&linked.every(b=>b.status==='cancelled'));
+    const finished=!!o.pickup_completed_at||o.status==='completed'||g.status==='completed'||
+      linked.some(b=>b.status==='completed'||!!b.completed_at||!!b.customer_confirmed_at||!!b.auto_confirmed_at);
+    const terminal=cancelled||finished;
+    // Only use actual completion timestamps. Unknown timestamp => fail closed,
+    // rather than accidentally offering a new two-hour window for old orders.
+    const stamps=[o.pickup_completed_at,...linked.flatMap(b=>[
+      b.completed_at,b.customer_confirmed_at,b.auto_confirmed_at
+    ])].map(v=>v?Date.parse(v):NaN).filter(Number.isFinite);
+    const finishedAt=stamps.length?Math.max(...stamps):0;
+    const expiresAt=finishedAt?finishedAt+2*60*60*1000:0;
+    const canContact=!cancelled&&(!finished||(expiresAt>now));
+    return {terminal,cancelled,finished,canContact,expiresAt:finished&&canContact?expiresAt:0};
+  }
+
+  function refreshSellerContactExpiry(){
+    document.querySelectorAll('[data-seller-contact-expires]').forEach(el=>{
+      const until=Number(el.getAttribute('data-seller-contact-expires'));
+      if(!until||Date.now()<until)return;
+      el.textContent='ลูกค้า · 🔒 ปิดข้อมูลติดต่อแล้ว';
+      el.removeAttribute('data-seller-contact-expires');
+    });
+  }
+
   function sellerOrderCard(o){
     const rejectable=['pending_shop','awaiting_customer_confirmation','awaiting_payment','payment_review','preparing'].includes(o.status);let refund='';
     if(o.refund_required){const rs=o.refund_status||'pending';if(rs==='pending')refund=o.refund_destination_submitted_at?`<div class="warning-banner">⚠️ ต้องคืนเงินลูกค้า ${money(o.refund_amount||o.subtotal)} บาท<br><b>${esc(refundDestinationLabel(o,false))}</b></div><div class="mo-actions"><button class="mo-primary" data-refund-order="${o.id}">💸 แจ้งคืนเงินแล้ว</button></div>`:`<div class="warning-banner">⏳ ต้องคืนเงิน ${money(o.refund_amount||o.subtotal)} บาท แต่ลูกค้ายังไม่ได้ระบุช่องทางรับเงินคืน</div>`;else if(rs==='seller_submitted')refund=`<div class="ready-banner">💸 ร้านแจ้งคืนเงิน ${money(o.refund_amount||o.subtotal)} บาทแล้ว กำลังรอลูกค้ายืนยัน</div><div class="mo-actions">${o.refund_slip_path?`<button class="mo-secondary" onclick="window.marketOrderOpenRefundSlip('${o.id}','${esc(o.refund_slip_path)}')">ดูหลักฐานคืนเงิน</button>`:''}</div>`;else if(rs==='completed')refund=`<div class="ready-banner">✅ ลูกค้ายืนยันได้รับเงินคืน ${money(o.refund_amount||o.subtotal)} บาทแล้ว</div>`;}
-    // KTB_STAGING_SELLER_RIDER_PICKUP_GUARD_R2: this order's batch only; do not hide another shop's action.
-    const riderPickedUpThisOrder=o.group?.fulfillment_method!=='pickup'&&(o.group?.batches||[]).some(b=>
-      b.status!=='cancelled'&&
-      (b.batch_orders||[]).some(bo=>String(bo.order_id)===String(o.id))&&
-      (!!b.picked_up_at||!!b.delivering_at||!!b.delivery_arrived_at||!!b.completed_at||
-       ['picked_up','delivering','arrived','completed'].includes(String(b.status||'')))
-    );
-    const closed=!!o.pickup_completed_at||['completed','cancelled'].includes(o.status)||['completed','cancelled'].includes(o.group?.status)||riderPickedUpThisOrder;const phone=closed?maskPhone(o.group?.customer_phone):o.group?.customer_phone||'';const overdue=o.status==='pending_shop'&&o.shop_response_due_at&&new Date(o.shop_response_due_at)<new Date();
+    const closed=!!o.pickup_completed_at||['cancelled','completed'].includes(o.status)||['cancelled','completed'].includes(o.group?.status)||(o.group?.batches||[]).some(b=>(b.batch_orders||[]).some(x=>String(x.order_id)===String(o.id))&&(b.picked_up_at||b.delivering_at||b.delivery_arrived_at||b.completed_at||['picked_up','delivering','arrived','completed'].includes(b.status)));const privacy=sellerCustomerPrivacy(o);const phone=privacy.canContact?(o.group?.customer_phone||''):'';const customerName=privacy.canContact?(o.group?.customer_name||'ลูกค้า'):'ลูกค้า';const contactExpiry=privacy.expiresAt?` data-seller-contact-expires="${privacy.expiresAt}"`:'';const deliveryLocation=privacy.terminal?(privacy.cancelled?'🛵 จัดส่ง · 🔒 ซ่อนที่อยู่ (ยกเลิกงาน)':'🛵 จัดส่ง · 🔒 ซ่อนที่อยู่หลังจบงาน'):`🛵 จัดส่ง · ${esc(o.group?.delivery_address||'')}`;const overdue=o.status==='pending_shop'&&o.shop_response_due_at&&new Date(o.shop_response_due_at)<new Date();
     const pendingActions=o.status==='pending_shop'?`<div class="warning-banner">${overdue?'⚠️ รอรับออเดอร์เกิน 15 นาทีแล้ว':'ลูกค้ายังไม่ได้ชำระเงิน ร้านสามารถโทรคุยและตรวจรายการก่อนรับได้'}</div><div class="mo-actions"><button class="mo-primary" data-accept-order="${o.id}">✅ รับออเดอร์</button><button class="mo-secondary" data-revise-order="${o.id}">✏️ เสนอเปลี่ยนรายการ/ยอด</button></div>`:'';
     const revisionWait=o.status==='awaiting_customer_confirmation'?`<div class="warning-banner">⏳ รอลูกค้ายืนยันรายการใหม่<br>${esc(o.revision_note||'')}<br>ยอดที่เสนอ <b>${money(o.revision_subtotal||o.subtotal)} บาท</b></div>`:'';
     const unseen=!isOrderSeen(o.id),nextAction=orderActionLabel(o);
-    return `<article class="order-card ${unseen?'order-unseen':''}" data-order-card-id="${esc(o.id)}"><div class="order-card-head"><div><div class="seller-order-title"><b>เลขอ้างอิง #${esc(sharedOrderRef(o.group?.id||o.group_id))}</b>${unseen?'<span class="order-new-badge">ใหม่</span>':''}<span class="order-age ${overdue?'urgent':''}">⏱ ${esc(sellerOrderAge(o))}</span></div>${nextAction?`<div class="order-next-action">ตอนนี้: <b>${esc(nextAction)}</b></div>`:''}<div class="mo-muted">${esc(o.group?.customer_name||'ลูกค้า')} · ${esc(phone)} ${!closed&&phone?`<a href="tel:${esc(phone)}">📞 โทร</a>`:''}<br>${o.group?.fulfillment_method==='pickup'?`🏪 รับเองที่ร้าน${o.group?.pickup_requested_at?` · ขอรับ ${new Date(o.group.pickup_requested_at).toLocaleString('th-TH')}`:' · รับเร็วที่สุด'}`:`🛵 จัดส่ง · ${esc(o.group?.delivery_address||'')}`}</div></div><span class="status-pill status-${esc(o.status)}">${esc(statusText(o.status))}</span></div><div class="order-items">${(o.items||[]).map(i=>renderOrderItem(i,false)).join('')}</div><b>ยอด ${money(o.subtotal)} บาท</b>${o.pickup_completed_at?`<div class="ready-banner">✅ ลูกค้ารับสินค้าแล้ว<br><small>${new Date(o.pickup_completed_at).toLocaleString('th-TH')}</small></div>`:''}${o.revision_confirmed_at&&o.revision_note?`<div class="ready-banner">✅ ลูกค้ายืนยันรายการแก้ไขแล้ว: ${esc(o.revision_note)}</div>`:''}${pendingActions}${revisionWait}${o.payment_ref?`<div>อ้างอิง: ${esc(o.payment_ref)}</div>`:''}${o.rejection_reason?`<div class="mo-muted">เหตุผลยกเลิก: ${esc(o.rejection_reason)}</div>`:''}${sellerOrderDeliveryInfo(o)}${refund}<div class="mo-actions">${o.payment_slip_path?`<button class="mo-secondary" onclick="window.marketOrderOpenSlip('${esc(o.payment_slip_path)}')">ดูสลิปชำระ</button>`:''}${o.status==='payment_review'?`<button class="mo-primary" data-order-id="${o.id}" data-order-status="preparing">✅ เงินเข้าแล้ว / เริ่มเตรียม</button><button class="mo-danger" data-order-id="${o.id}" data-order-status="awaiting_payment">ยังไม่พบยอด</button>`:''}${o.status==='preparing'&&!closed?`<button class="mo-primary" data-order-id="${o.id}" data-order-status="ready">📦 สินค้าพร้อมรับ</button>`:''}${o.status==='ready'&&o.group?.fulfillment_method==='pickup'&&!o.pickup_completed_at?`<button class="mo-primary" data-pickup-complete="${o.id}">✅ ลูกค้ารับสินค้าแล้ว</button>`:''}${rejectable?`<button class="mo-danger" data-reject-order="${o.id}">ปฏิเสธออเดอร์</button>`:''}</div></article>`;
+    return `<article class="order-card ${unseen?'order-unseen':''}" data-order-card-id="${esc(o.id)}"><div class="order-card-head"><div><div class="seller-order-title"><b>เลขอ้างอิง #${esc(sharedOrderRef(o.group?.id||o.group_id))}</b>${unseen?'<span class="order-new-badge">ใหม่</span>':''}<span class="order-age ${overdue?'urgent':''}">⏱ ${esc(sellerOrderAge(o))}</span></div>${nextAction?`<div class="order-next-action">ตอนนี้: <b>${esc(nextAction)}</b></div>`:''}<div class="mo-muted"><span class="seller-private-contact"${contactExpiry}>${esc(customerName)}${phone?` · ${esc(phone)} <a href="tel:${esc(phone)}">📞 โทรลูกค้า</a>`:privacy.terminal?' · 🔒 ปิดข้อมูลติดต่อแล้ว':''}</span><br>${o.group?.fulfillment_method==='pickup'?`🏪 รับเองที่ร้าน${o.group?.pickup_requested_at?` · ขอรับ ${new Date(o.group.pickup_requested_at).toLocaleString('th-TH')}`:' · รับเร็วที่สุด'}`:deliveryLocation}</div></div><span class="status-pill status-${esc(o.status)}">${esc(statusText(o.status))}</span></div><div class="order-items">${(o.items||[]).map(i=>renderOrderItem(i,false)).join('')}</div><b>ยอด ${money(o.subtotal)} บาท</b>${o.pickup_completed_at?`<div class="ready-banner">✅ ลูกค้ารับสินค้าแล้ว<br><small>${new Date(o.pickup_completed_at).toLocaleString('th-TH')}</small></div>`:''}${o.revision_confirmed_at&&o.revision_note?`<div class="ready-banner">✅ ลูกค้ายืนยันรายการแก้ไขแล้ว: ${esc(o.revision_note)}</div>`:''}${pendingActions}${revisionWait}${o.payment_ref?`<div>อ้างอิง: ${esc(o.payment_ref)}</div>`:''}${o.rejection_reason?`<div class="mo-muted">เหตุผลยกเลิก: ${esc(o.rejection_reason)}</div>`:''}${sellerOrderDeliveryInfo(o)}${refund}<div class="mo-actions">${o.payment_slip_path?`<button class="mo-secondary" onclick="window.marketOrderOpenSlip('${esc(o.payment_slip_path)}')">ดูสลิปชำระ</button>`:''}${o.status==='payment_review'?`<button class="mo-primary" data-order-id="${o.id}" data-order-status="preparing">✅ เงินเข้าแล้ว / เริ่มเตรียม</button><button class="mo-danger" data-order-id="${o.id}" data-order-status="awaiting_payment">ยังไม่พบยอด</button>`:''}${o.status==='preparing'&&!closed?`<button class="mo-primary" data-order-id="${o.id}" data-order-status="ready">📦 สินค้าพร้อมรับ</button>`:''}${o.status==='ready'&&o.group?.fulfillment_method==='pickup'&&!o.pickup_completed_at?`<button class="mo-primary" data-pickup-complete="${o.id}">✅ ลูกค้ารับสินค้าแล้ว</button>`:''}${rejectable?`<button class="mo-danger" data-reject-order="${o.id}">ปฏิเสธออเดอร์</button>`:''}</div></article>`;
   }
   function maskPhone(v){const x=String(v||'');if(x.length<7)return x?x.slice(0,2)+'X-XXX-'+x.slice(-3):'';return x.slice(0,2)+'X-XXX-'+x.slice(-3);}
 

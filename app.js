@@ -510,6 +510,18 @@
     }
   }
 
+  // KTB_PRIVACY_RIDER_20261101: show only district/subdistrict until accepted.
+  // Do not send private contact, exact address or GPS into the waiting-job HTML.
+  // Server-side inbox RPC must also redact these fields for unassigned Riders.
+  function riderApproxDeliveryArea(address){
+    const value=String(address||'');
+    const sub=value.match(/(?:ต\.|ตำบล|แขวง)\s*([^\s,]+)/)?.[1]||'';
+    const district=value.match(/(?:อ\.|อำเภอ|เขต)\s*([^\s,]+)/)?.[1]||'';
+    const province=value.match(/(?:จ\.|จังหวัด)\s*([^\s,]+)/)?.[1]||'';
+    const parts=[sub?`ต./แขวง ${sub}`:'',district?`อ./เขต ${district}`:'',province?`จ.${province}`:''].filter(Boolean);
+    return parts.length?parts.join(' · '):'พื้นที่จัดส่งจะแสดงหลังรับงาน';
+  }
+
   function riderJobCard(job){
     const waiting=Boolean(job?.can_accept);
     const mine=Boolean(job?.is_mine);
@@ -530,9 +542,11 @@
       </div>`;
     }).join(''):'<div class="muted">ไม่พบรายละเอียดร้าน</div>';
 
-    const customer=job?.customer_name||'-',phone=job?.customer_phone||'',address=job?.delivery_address||'-';
-    const deliveryMap=riderMapLink(job?.delivery_lat,job?.delivery_lng,'จุดส่งลูกค้า');
-    const deliveryCoord=riderCoordinateText(job?.delivery_lat,job?.delivery_lng);
+    const canSeeCustomer=mine&&!['completed','cancelled'].includes(String(job?.status||''))&&!job?.completed_at&&!job?.cancelled_at;
+    const customer=canSeeCustomer?(job?.customer_name||'-'):'',phone=canSeeCustomer?(job?.customer_phone||''):'',address=canSeeCustomer?(job?.delivery_address||'-'):'';
+    const deliveryMap=canSeeCustomer?riderMapLink(job?.delivery_lat,job?.delivery_lng,'จุดส่งลูกค้า'):null;
+    const deliveryCoord=canSeeCustomer?riderCoordinateText(job?.delivery_lat,job?.delivery_lng):'';
+    const approximateArea=riderApproxDeliveryArea(job?.delivery_address);
     const fee=Number(job?.delivery_fee||0),km=Number(job?.distance_km||0);
     // Show the same group reference as the shop; never present a batch ID as an order ID.
     // The internal batch_id is intentionally unchanged for all Rider actions.
@@ -551,14 +565,15 @@
 
       <div class="rider-job-section">
         <strong>จุดส่งลูกค้า</strong>
-        <div>👤 ${esc(customer)}</div>
+        ${canSeeCustomer?`<div>👤 ${esc(customer)}</div>
         ${phone?`<a href="tel:${esc(phone)}">☎ ${esc(phone)}</a>`:''}
         <div>📍 ${esc(address)}</div>
         <small>📌 พิกัด: ${esc(deliveryCoord)}</small>
         <div class="rider-contact-actions">
           ${phone?`<a class="rider-mini-btn" href="tel:${esc(phone)}">☎ โทรลูกค้า</a>`:''}
           ${deliveryMap?`<a class="rider-mini-btn map" href="${esc(deliveryMap)}" target="_blank" rel="noopener">🧭 นำทางไปจุดส่ง</a>`:''}
-        </div>
+        </div>`:`<div>📍 ${esc(approximateArea)}</div>
+        <small>🔒 ชื่อ เบอร์โทร ที่อยู่เต็ม และ GPS จะเปิดเผยเฉพาะ Rider ที่กดรับงานสำเร็จ</small>`}
       </div>
 
       ${waiting?`<button type="button" class="primary rider-accept-job" data-rider-accept-batch="${esc(job.batch_id)}">✅ รับงานนี้</button>`:riderProgressAction(job)}
@@ -3533,7 +3548,7 @@
     if(archived&&shop.status!=='approved')return alert('ปิดใช้งานได้เฉพาะร้านที่เผยแพร่แล้ว');
     if(!archived&&shop.status!=='archived')return alert('ร้านนี้ไม่ได้อยู่ในสถานะปิดใช้งาน');
     const message=archived
-      ?`ยืนยันปิดใช้งานร้าน “${shop.name}” หรือไม่?\n\nร้านจะหายจากหน้าลูกค้าและไม่สามารถรับออเดอร์ใหม่ แต่สินค้า รีวิว และออเดอร์เก่าจะยังอยู่ทั้งหมด\n\nสามารถกู้คืนร้านได้ภายหลัง`
+      ?`ยืนยันปิดใช้งานร้าน “${shop.name}” หรือไม่?\n\nร้านจะหายจากหน้าร้านค้าที่ลูกค้าเลือกซื้อได้ตามปกติ แต่สินค้า รีวิว และออเดอร์เก่าจะยังอยู่ทั้งหมด\n\nสามารถกู้คืนร้านได้ภายหลัง`
       :`ยืนยันกู้คืนร้าน “${shop.name}” หรือไม่?\n\nร้านจะกลับมาแสดงต่อสาธารณะอีกครั้ง`;
     if(!confirm(message))return;
     const previousLabel=button?.textContent;
