@@ -2594,13 +2594,39 @@ if(e.target.closest('#showDeliveryFareInfoBtn'))return showDeliveryFareInfo(fals
     if(!session)return requireLogin();const orderId=document.getElementById('refundOrderId')?.value,ref=document.getElementById('refundRef')?.value.trim(),file=document.getElementById('refundSlip')?.files?.[0];if(!orderId||!file)return alert('กรุณาแนบสลิปคืนเงิน');const btn=document.getElementById('submitRefundBtn');btn.disabled=true;btn.textContent='กำลังส่ง...';
     let oldPath=null,newPath=null;try{const {data:o,error:readErr}=await db.from('market_orders').select('refund_slip_path').eq('id',orderId).maybeSingle();if(readErr)throw readErr;oldPath=o?.refund_slip_path||null;const packed=await compressImage(file,{maxSide:1800,targetBytes:600*1024,quality:.86,minQuality:.68});newPath=`${orderId}/${session.user.id}/refund-${Date.now()}.webp`;const {error:up}=await db.storage.from('order-slips').upload(newPath,packed,{contentType:'image/webp',upsert:false});if(up)throw up;const {data,error}=await db.rpc('market_shop_submit_refund',{p_order_id:orderId,p_refund_ref:ref||null,p_refund_slip_path:newPath});if(error)throw error;if(oldPath&&oldPath!==newPath)await safeRemove('order-slips',oldPath);sendOrderPush('refund_submitted',{order_id:orderId});alert('แจ้งคืนเงินแล้ว รอลูกค้ายืนยันว่าได้รับเงิน');(document.getElementById('sellerOrdersOnly')?openSellerOrders:openSellerShop)(data?.shop_id||document.getElementById('sellerShopId')?.value);}catch(err){if(newPath)await safeRemove('order-slips',newPath);btn.disabled=false;btn.textContent='ส่งหลักฐานคืนเงินให้ลูกค้า';alert('แจ้งคืนเงินไม่สำเร็จ: '+err.message)}
   }
+  // STAGING_PROOF_PREVIEW_FIX_20261102: show the short-lived signed URL in a
+  // user-clicked preview, instead of window.open() after an await (popup blocked).
+  // Signed links and RLS permissions are still enforced by Supabase.
   async function viewDeliveryProof(batchId){
-    const {data:b,error}=await db.from('market_delivery_batches').select('proof_path,proof_deleted_at').eq('id',batchId).maybeSingle();
-    if(error||!b)return alert(error?.message||'ไม่พบข้อมูลการส่งมอบ');
-    if(b.proof_deleted_at||!b.proof_path)return alert('หลักฐานรูปถูกลบตามนโยบายแล้ว');
-    const {data,error:se}=await db.storage.from('rider-delivery-proof').createSignedUrl(b.proof_path,120);
-    if(se||!data?.signedUrl)return alert(se?.message||'เปิดหลักฐานไม่สำเร็จ');
-    window.open(data.signedUrl,'_blank');
+    if(!db||!session?.user?.id)return requireLogin();
+    openModal(`<h2 class="mo-title">📷 หลักฐานการส่งมอบ</h2><p class="mo-muted">กำลังตรวจสอบสิทธิ์และโหลดภาพ...</p>`);
+    try{
+      const {data:b,error}=await db.from('market_delivery_batches')
+        .select('proof_path,proof_deleted_at').eq('id',batchId).maybeSingle();
+      if(error)throw error;
+      if(!b)throw new Error('ไม่พบข้อมูลหลักฐานหรือบัญชีนี้ไม่มีสิทธิ์อ่านรายการจัดส่ง');
+      if(b.proof_deleted_at||!b.proof_path)throw new Error('หลักฐานไม่มีอยู่ในรายการนี้ หรือถูกลบตามนโยบายแล้ว');
+      const {data,error:se}=await db.storage.from('rider-delivery-proof').createSignedUrl(b.proof_path,120);
+      if(se)throw se;
+      if(!data?.signedUrl)throw new Error('ไม่สามารถสร้างลิงก์เปิดรูปได้ กรุณาตรวจ Storage Policy');
+      const signed=String(data.signedUrl);
+      if(!signed.startsWith('https://'))throw new Error('ลิงก์รูปไม่ปลอดภัย');
+      openModal(`<h2 class="mo-title">📷 หลักฐานการส่งมอบ</h2>
+        <p class="mo-muted">ลิงก์ภาพใช้งานได้ 120 วินาที หากหมดอายุให้กลับไปกดดูใหม่</p>
+        <img id="ktbDeliveryProofPreview" src="${esc(signed)}" alt="ภาพหลักฐานการส่งมอบ" style="width:100%;max-height:65vh;object-fit:contain;border-radius:10px;background:#f4f4f5">
+        <div id="ktbDeliveryProofImageError" class="mo-muted" style="display:none;padding:10px">เบราว์เซอร์โหลดไฟล์ภาพไม่ได้ กรุณาตรวจว่าไฟล์ยังอยู่ใน Staging Storage และมีสิทธิ์อ่าน</div>
+        <div class="mo-actions"><a class="mo-primary" href="${esc(signed)}" target="_blank" rel="noopener noreferrer" style="text-align:center;text-decoration:none;padding:10px 16px;display:inline-block">🔎 เปิดภาพเต็มขนาด</a></div>`);
+      document.getElementById('ktbDeliveryProofPreview')?.addEventListener('error',()=>{
+        const box=document.getElementById('ktbDeliveryProofImageError');if(box)box.style.display='block';
+      },{once:true});
+    }catch(err){
+      const code=err?.code?` (${String(err.code).slice(0,40)})`:'';
+      console.warn('Delivery proof preview denied or unavailable',err?.message||err);
+      openModal(`<h2 class="mo-title">📷 เปิดหลักฐานไม่สำเร็จ</h2>
+        <p>ตรวจสอบสิทธิ์ Storage หรือความพร้อมของรูปใน Supabase Staging</p>
+        <p class="mo-muted">${esc(String(err?.message||err||'ไม่ทราบสาเหตุ')+code)}</p>
+        <p class="mo-muted">ไม่ควรเปิด Storage เป็น Public เพื่อแก้ปัญหานี้</p>`);
+    }
   }
 
   async function switchDeliveryToPickup(batchId){

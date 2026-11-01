@@ -458,6 +458,36 @@
       return `<div class="ktb-main-rider-items-row">${picture}<div class="ktb-main-rider-items-copy"><b>${esc(product)}</b>${opts?`<small>ตัวเลือก: ${esc(opts)}</small>`:''}${note?`<small>หมายเหตุ: ${esc(note)}</small>`:''}</div><span class="ktb-main-rider-items-qty">×${Math.max(0,Number(item.qty)||0)}</span></div>`;
     }).join('')}`).join('');
   }
+  // STAGING_RIDER_ITEMS_FALLBACK_20261102: the custom RPC is optional in test DBs.
+  // Fallback only for jobs which the authenticated Rider already owns, using
+  // the shop order IDs supplied by the authenticated Rider inbox. PostgREST RLS
+  // remains in force. Do not add a privileged service key or open a policy here.
+  async function ktbMainRiderReadOwnOrderItems(jobs){
+    const own=(Array.isArray(jobs)?jobs:[]).filter(j=>j?.is_mine);
+    const orderToJobs=new Map();
+    for(const job of own){
+      for(const shop of (Array.isArray(job.shops)?job.shops:[])){
+        const orderId=String(shop?.order_id||'');
+        if(!/^[0-9a-f-]{36}$/i.test(orderId))continue;
+        if(!orderToJobs.has(orderId))orderToJobs.set(orderId,[]);
+        orderToJobs.get(orderId).push({batch_id:String(job.batch_id),shop_id:shop.id||'',shop_name:shop.name||'ร้านค้า'});
+      }
+    }
+    const ids=[...orderToJobs.keys()];
+    if(!ids.length)throw new Error('ไม่พบเลขออเดอร์ร้านค้าที่เชื่อมกับงาน Rider');
+    const {data,error}=await db.from('market_order_items')
+      .select('order_id,product_name,qty,options_json,note')
+      .in('order_id',ids).limit(1000);
+    if(error)throw error;
+    const result=[];
+    for(const item of Array.isArray(data)?data:[]){
+      for(const shop of orderToJobs.get(String(item.order_id))||[]){
+        result.push({...item,...shop,image_url:''});
+      }
+    }
+    return result;
+  }
+
   async function ktbMainRiderAttachItems(jobs){
     const run=++ktbMainRiderItemsRun;
     const mine=(Array.isArray(jobs)?jobs:[]).filter(j=>j?.is_mine&&j?.batch_id).slice(0,30);
@@ -474,8 +504,19 @@
     }
     const ids=[...new Set(mine.map(j=>String(j.batch_id)))];
     try{
-      const {data,error}=await db.rpc('ktb_market_rider_batch_items',{p_batch_ids:ids});
-      if(error)throw error;
+      let {data,error}=await db.rpc('ktb_market_rider_batch_items',{p_batch_ids:ids});
+      let fallbackUsed=false;
+      let originalError=error;
+      if(error||!Array.isArray(data)||data.length===0){
+        try{
+          data=await ktbMainRiderReadOwnOrderItems(mine);
+          fallbackUsed=true;
+          if(originalError)console.warn('Rider item RPC unavailable, trying permitted own-order fallback:',originalError.message||originalError);
+        }catch(fallbackErr){
+          const first=originalError?`RPC: ${originalError.message||originalError}; `:'';
+          throw new Error(first+`อ่านรายการออเดอร์: ${fallbackErr?.message||fallbackErr}`);
+        }
+      }
       if(run!==ktbMainRiderItemsRun)return;
       const byBatch=new Map();
       for(const row of Array.isArray(data)?data:[]){
@@ -493,7 +534,7 @@
           continue;
         }
         const qty=list.reduce((n,row)=>n+Math.max(0,Number(row.qty)||0),0);
-        panel.innerHTML=`<summary>📦 รายการสินค้า ${list.length} รายการ (${qty} ชิ้น) <small>แตะเพื่อตรวจสอบ</small></summary><div class="ktb-main-rider-items-body"></div>`;
+        panel.innerHTML=`<summary>📦 รายการสินค้า ${list.length} รายการ (${qty} ชิ้น) <small>${fallbackUsed?'อ่านจากออเดอร์ · ':''}แตะเพื่อตรวจสอบ</small></summary><div class="ktb-main-rider-items-body"></div>`;
         panel.addEventListener('toggle',()=>{
           if(!panel.open)return;
           const body=panel.querySelector('.ktb-main-rider-items-body');
@@ -505,7 +546,7 @@
       console.warn('Main Rider: load linked market items failed',err?.message||err);
       for(const job of mine){
         const panel=document.querySelector(`[data-rider-job-batch="${CSS.escape(String(job.batch_id))}"] .ktb-main-rider-items`);
-        if(panel)panel.innerHTML='<summary>📦 รายการสินค้า <small>โหลดไม่สำเร็จ กรุณาเปิดใหม่</small></summary>';
+        if(panel)panel.innerHTML=`<summary>📦 รายการสินค้า <small>ไม่สามารถโหลดได้ · แตะดูสาเหตุ</small></summary><div style="padding:10px;font-size:12px;color:#9f1239;overflow-wrap:anywhere">${esc(String(err?.message||err||'ไม่ทราบสาเหตุ').slice(0,400))}<div style="margin-top:8px"><button type="button" class="secondary" data-rider-items-retry="1">ลองโหลดข้อมูลใหม่</button></div></div>`;
       }
     }
   }
@@ -4074,6 +4115,7 @@
       input?.click();
       return;
     }
+    if(e.target.closest?.('[data-rider-items-retry]')){e.preventDefault();loadRiderJobInbox({quiet:true});return;}
     if(e.target.closest?.('#refreshRiderJobsBtn')){e.preventDefault();loadRiderJobInbox();return;}
   });
 
