@@ -568,7 +568,7 @@
     const district=value.match(/(?:อ\.|อำเภอ|เขต)\s*([^\s,]+)/)?.[1]||'';
     const province=value.match(/(?:จ\.|จังหวัด)\s*([^\s,]+)/)?.[1]||'';
     const parts=[sub?`ต./แขวง ${sub}`:'',district?`อ./เขต ${district}`:'',province?`จ.${province}`:''].filter(Boolean);
-    return parts.length?parts.join(' · '):'พื้นที่จัดส่งจะแสดงหลังรับงาน';
+    return parts.length?parts.join(' · '):'ไม่พบข้อมูลตำบล/อำเภอ กรุณาดูระยะทางก่อนรับงาน';
   }
 
   function riderJobCard(job){
@@ -595,7 +595,7 @@
     const customer=canSeeCustomer?(job?.customer_name||'-'):'',phone=canSeeCustomer?(job?.customer_phone||''):'',address=canSeeCustomer?(job?.delivery_address||'-'):'';
     const deliveryMap=canSeeCustomer?riderMapLink(job?.delivery_lat,job?.delivery_lng,'จุดส่งลูกค้า'):null;
     const deliveryCoord=canSeeCustomer?riderCoordinateText(job?.delivery_lat,job?.delivery_lng):'';
-    const approximateArea=riderApproxDeliveryArea(job?.delivery_address);
+    const approximateArea=String(job?.delivery_area||'').trim()||riderApproxDeliveryArea(job?.delivery_address);
     const fee=Number(job?.delivery_fee||0),km=Number(job?.distance_km||0);
     // Show the same group reference as the shop; never present a batch ID as an order ID.
     // The internal batch_id is intentionally unchanged for all Rider actions.
