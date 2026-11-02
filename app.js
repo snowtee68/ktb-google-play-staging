@@ -504,9 +504,20 @@
     }
     const ids=[...new Set(mine.map(j=>String(j.batch_id)))];
     try{
-      let {data,error}=await db.rpc('ktb_market_rider_batch_items',{p_batch_ids:ids});
+      // KTB_RIDER_ITEMS_SECURE_RPC_V2: only accepted active jobs are readable by the assigned Rider.
+      // Staging SQL installs this as a NEW RPC, leaving existing RPCs untouched.
+      let {data,error}=await db.rpc('ktb_market_rider_batch_items_v2',{p_batch_ids:ids});
       let fallbackUsed=false;
       let originalError=error;
+      if(error){
+        console.warn('Rider items v2 RPC unavailable:',error.message||error);
+        const legacy=await db.rpc('ktb_market_rider_batch_items',{p_batch_ids:ids});
+        if(!legacy.error && Array.isArray(legacy.data) && legacy.data.length){
+          data=legacy.data; error=null; originalError=null;
+        }else{
+          originalError=new Error('RPC v2: '+String(error.message||error)+(legacy.error?' / RPC เดิม: '+String(legacy.error.message||legacy.error):''));
+        }
+      }
       if(error||!Array.isArray(data)||data.length===0){
         try{
           data=await ktbMainRiderReadOwnOrderItems(mine);
@@ -534,12 +545,9 @@
           continue;
         }
         const qty=list.reduce((n,row)=>n+Math.max(0,Number(row.qty)||0),0);
-        panel.innerHTML=`<summary>📦 รายการสินค้า ${list.length} รายการ (${qty} ชิ้น) <small>${fallbackUsed?'อ่านจากออเดอร์ · ':''}แตะเพื่อตรวจสอบ</small></summary><div class="ktb-main-rider-items-body"></div>`;
-        panel.addEventListener('toggle',()=>{
-          if(!panel.open)return;
-          const body=panel.querySelector('.ktb-main-rider-items-body');
-          if(body&&!body.dataset.loaded){body.innerHTML=ktbMainRiderItemRowsHtml(list);body.dataset.loaded='1'}
-        });
+        // Render contents now rather than waiting for a delayed toggle event.
+        // This also works if the user already opened the details while loading.
+        panel.innerHTML=`<summary>📦 รายการสินค้า ${list.length} รายการ (${qty} ชิ้น) <small>${fallbackUsed?'อ่านจากออเดอร์ · ':''}แตะเพื่อตรวจสอบ</small></summary><div class="ktb-main-rider-items-body">${ktbMainRiderItemRowsHtml(list)}</div>`;
       }
     }catch(err){
       if(run!==ktbMainRiderItemsRun)return;
