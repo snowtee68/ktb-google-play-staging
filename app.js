@@ -109,6 +109,34 @@
     return myRiderApplication;
   }
 
+  // KTB-RIDER-CODE-PATCH-V2: optional, read-only identity display. No delivery logic changes.
+  async function ktbShowMyRiderCode(){
+    if(!db||!session||myRiderApplication?.status!=='approved')return;
+    const summary=$('riderApprovedProfileSummary');
+    if(!summary)return;
+    try{
+      const {data,error}=await db.rpc('ktb_my_rider_code');
+      if(error)throw error;
+      if(data&&myRiderApplication?.status==='approved'){
+        summary.querySelector('[data-ktb-rider-code]')?.remove();
+        summary.insertAdjacentHTML('afterbegin',`<div data-ktb-rider-code><span>รหัสประจำตัว Rider</span><b>${esc(data)}</b></div>`);
+      }
+    }catch(err){console.warn('Rider code display unavailable:',err?.message||err);}
+  }
+
+  async function ktbLoadAdminCodes(){
+    const result=new Map();
+    if(!db||profile?.role!=='admin')return result;
+    try{
+      const {data,error}=await db.rpc('ktb_admin_rider_codes');
+      if(error)throw error;
+      (Array.isArray(data)?data:[]).forEach(r=>{
+        if(r.user_id&&r.rider_code)result.set(String(r.user_id),String(r.rider_code));
+      });
+    }catch(err){console.warn('Admin Rider code lookup unavailable:',err?.message||err);}
+    return result;
+  }
+
   function updateRiderJoinButton(){
     const btn=$('riderJoinBtn'),label=$('riderJoinLabel');
     if(!btn||!label)return;
@@ -184,6 +212,7 @@
           <div><span>เบอร์โทร</span><b>${esc(a.phone||'-')}</b></div>
           <div><span>ทะเบียนรถ</span><b>${esc(a.vehicle_plate||'-')}</b></div>
         `;
+        void ktbShowMyRiderCode();
         renderRiderAvailability();
         // R16.1: local sound test controls for approved Rider. No job/order/push is created.
         if(approved&&!approved.querySelector('#riderNativeAudioTestBox')){
@@ -458,36 +487,6 @@
       return `<div class="ktb-main-rider-items-row">${picture}<div class="ktb-main-rider-items-copy"><b>${esc(product)}</b>${opts?`<small>ตัวเลือก: ${esc(opts)}</small>`:''}${note?`<small>หมายเหตุ: ${esc(note)}</small>`:''}</div><span class="ktb-main-rider-items-qty">×${Math.max(0,Number(item.qty)||0)}</span></div>`;
     }).join('')}`).join('');
   }
-  // STAGING_RIDER_ITEMS_FALLBACK_20261102: the custom RPC is optional in test DBs.
-  // Fallback only for jobs which the authenticated Rider already owns, using
-  // the shop order IDs supplied by the authenticated Rider inbox. PostgREST RLS
-  // remains in force. Do not add a privileged service key or open a policy here.
-  async function ktbMainRiderReadOwnOrderItems(jobs){
-    const own=(Array.isArray(jobs)?jobs:[]).filter(j=>j?.is_mine);
-    const orderToJobs=new Map();
-    for(const job of own){
-      for(const shop of (Array.isArray(job.shops)?job.shops:[])){
-        const orderId=String(shop?.order_id||'');
-        if(!/^[0-9a-f-]{36}$/i.test(orderId))continue;
-        if(!orderToJobs.has(orderId))orderToJobs.set(orderId,[]);
-        orderToJobs.get(orderId).push({batch_id:String(job.batch_id),shop_id:shop.id||'',shop_name:shop.name||'ร้านค้า'});
-      }
-    }
-    const ids=[...orderToJobs.keys()];
-    if(!ids.length)throw new Error('ไม่พบเลขออเดอร์ร้านค้าที่เชื่อมกับงาน Rider');
-    const {data,error}=await db.from('market_order_items')
-      .select('order_id,product_name,qty,options_json,note')
-      .in('order_id',ids).limit(1000);
-    if(error)throw error;
-    const result=[];
-    for(const item of Array.isArray(data)?data:[]){
-      for(const shop of orderToJobs.get(String(item.order_id))||[]){
-        result.push({...item,...shop,image_url:''});
-      }
-    }
-    return result;
-  }
-
   async function ktbMainRiderAttachItems(jobs){
     const run=++ktbMainRiderItemsRun;
     const mine=(Array.isArray(jobs)?jobs:[]).filter(j=>j?.is_mine&&j?.batch_id).slice(0,30);
@@ -504,30 +503,8 @@
     }
     const ids=[...new Set(mine.map(j=>String(j.batch_id)))];
     try{
-      // KTB_RIDER_ITEMS_SECURE_RPC_V2: only accepted active jobs are readable by the assigned Rider.
-      // Staging SQL installs this as a NEW RPC, leaving existing RPCs untouched.
-      let {data,error}=await db.rpc('ktb_market_rider_batch_items_v2',{p_batch_ids:ids});
-      let fallbackUsed=false;
-      let originalError=error;
-      if(error){
-        console.warn('Rider items v2 RPC unavailable:',error.message||error);
-        const legacy=await db.rpc('ktb_market_rider_batch_items',{p_batch_ids:ids});
-        if(!legacy.error && Array.isArray(legacy.data) && legacy.data.length){
-          data=legacy.data; error=null; originalError=null;
-        }else{
-          originalError=new Error('RPC v2: '+String(error.message||error)+(legacy.error?' / RPC เดิม: '+String(legacy.error.message||legacy.error):''));
-        }
-      }
-      if(error||!Array.isArray(data)||data.length===0){
-        try{
-          data=await ktbMainRiderReadOwnOrderItems(mine);
-          fallbackUsed=true;
-          if(originalError)console.warn('Rider item RPC unavailable, trying permitted own-order fallback:',originalError.message||originalError);
-        }catch(fallbackErr){
-          const first=originalError?`RPC: ${originalError.message||originalError}; `:'';
-          throw new Error(first+`อ่านรายการออเดอร์: ${fallbackErr?.message||fallbackErr}`);
-        }
-      }
+      const {data,error}=await db.rpc('ktb_market_rider_batch_items',{p_batch_ids:ids});
+      if(error)throw error;
       if(run!==ktbMainRiderItemsRun)return;
       const byBatch=new Map();
       for(const row of Array.isArray(data)?data:[]){
@@ -545,30 +522,21 @@
           continue;
         }
         const qty=list.reduce((n,row)=>n+Math.max(0,Number(row.qty)||0),0);
-        // Render contents now rather than waiting for a delayed toggle event.
-        // This also works if the user already opened the details while loading.
-        panel.innerHTML=`<summary>📦 รายการสินค้า ${list.length} รายการ (${qty} ชิ้น) <small>${fallbackUsed?'อ่านจากออเดอร์ · ':''}แตะเพื่อตรวจสอบ</small></summary><div class="ktb-main-rider-items-body">${ktbMainRiderItemRowsHtml(list)}</div>`;
+        panel.innerHTML=`<summary>📦 รายการสินค้า ${list.length} รายการ (${qty} ชิ้น) <small>แตะเพื่อตรวจสอบ</small></summary><div class="ktb-main-rider-items-body"></div>`;
+        panel.addEventListener('toggle',()=>{
+          if(!panel.open)return;
+          const body=panel.querySelector('.ktb-main-rider-items-body');
+          if(body&&!body.dataset.loaded){body.innerHTML=ktbMainRiderItemRowsHtml(list);body.dataset.loaded='1'}
+        });
       }
     }catch(err){
       if(run!==ktbMainRiderItemsRun)return;
       console.warn('Main Rider: load linked market items failed',err?.message||err);
       for(const job of mine){
         const panel=document.querySelector(`[data-rider-job-batch="${CSS.escape(String(job.batch_id))}"] .ktb-main-rider-items`);
-        if(panel)panel.innerHTML=`<summary>📦 รายการสินค้า <small>ไม่สามารถโหลดได้ · แตะดูสาเหตุ</small></summary><div style="padding:10px;font-size:12px;color:#9f1239;overflow-wrap:anywhere">${esc(String(err?.message||err||'ไม่ทราบสาเหตุ').slice(0,400))}<div style="margin-top:8px"><button type="button" class="secondary" data-rider-items-retry="1">ลองโหลดข้อมูลใหม่</button></div></div>`;
+        if(panel)panel.innerHTML='<summary>📦 รายการสินค้า <small>โหลดไม่สำเร็จ กรุณาเปิดใหม่</small></summary>';
       }
     }
-  }
-
-  // KTB_PRIVACY_RIDER_20261101: show only district/subdistrict until accepted.
-  // Do not send private contact, exact address or GPS into the waiting-job HTML.
-  // Server-side inbox RPC must also redact these fields for unassigned Riders.
-  function riderApproxDeliveryArea(address){
-    const value=String(address||'');
-    const sub=value.match(/(?:ต\.|ตำบล|แขวง)\s*([^\s,]+)/)?.[1]||'';
-    const district=value.match(/(?:อ\.|อำเภอ|เขต)\s*([^\s,]+)/)?.[1]||'';
-    const province=value.match(/(?:จ\.|จังหวัด)\s*([^\s,]+)/)?.[1]||'';
-    const parts=[sub?`ต./แขวง ${sub}`:'',district?`อ./เขต ${district}`:'',province?`จ.${province}`:''].filter(Boolean);
-    return parts.length?parts.join(' · '):'ไม่พบข้อมูลตำบล/อำเภอ กรุณาดูระยะทางก่อนรับงาน';
   }
 
   function riderJobCard(job){
@@ -591,11 +559,9 @@
       </div>`;
     }).join(''):'<div class="muted">ไม่พบรายละเอียดร้าน</div>';
 
-    const canSeeCustomer=mine&&!['completed','cancelled'].includes(String(job?.status||''))&&!job?.completed_at&&!job?.cancelled_at;
-    const customer=canSeeCustomer?(job?.customer_name||'-'):'',phone=canSeeCustomer?(job?.customer_phone||''):'',address=canSeeCustomer?(job?.delivery_address||'-'):'';
-    const deliveryMap=canSeeCustomer?riderMapLink(job?.delivery_lat,job?.delivery_lng,'จุดส่งลูกค้า'):null;
-    const deliveryCoord=canSeeCustomer?riderCoordinateText(job?.delivery_lat,job?.delivery_lng):'';
-    const approximateArea=String(job?.delivery_area||'').trim()||riderApproxDeliveryArea(job?.delivery_address);
+    const customer=mine?(job?.customer_name||'-'):(job?.customer_name_preview||'-'),phone=mine?(job?.customer_phone||''):'',address=mine?(job?.delivery_address||'-'):(job?.delivery_area||'ไม่ระบุพื้นที่');
+    const deliveryMap=mine?riderMapLink(job?.delivery_lat,job?.delivery_lng,'จุดส่งลูกค้า'):'';
+    const deliveryCoord=mine?riderCoordinateText(job?.delivery_lat,job?.delivery_lng):'แสดงหลังรับงาน';
     const fee=Number(job?.delivery_fee||0),km=Number(job?.distance_km||0);
     // Show the same group reference as the shop; never present a batch ID as an order ID.
     // The internal batch_id is intentionally unchanged for all Rider actions.
@@ -608,21 +574,20 @@
         <div><b>${esc(displayRef)}</b><small>${esc(riderJobInboxStatusLabel(job?.status))}</small></div>
         <div class="rider-job-price">${fee?'รายได้ '+fee.toLocaleString('th-TH')+' บาท':'รอข้อมูลค่าจัดส่ง'}</div>
       </div>
-      <div class="rider-job-meta">${km?`📏 ${km.toFixed(1)} กม.`:''}${shops.length?` · 🏪 ${shops.length} จุดรับ`:''}</div>
+      <div class="rider-job-meta">${km?`📏 ระยะทางที่ระบบบันทึก ${km.toFixed(1)} กม.`:'📏 ระยะทาง: ยังไม่มีข้อมูล'}${shops.length?` · 🏪 ${shops.length} จุดรับ`:''}</div>
 
       <div class="rider-job-section"><strong>จุดรับสินค้า</strong>${shopHtml}</div>
 
       <div class="rider-job-section">
         <strong>จุดส่งลูกค้า</strong>
-        ${canSeeCustomer?`<div>👤 ${esc(customer)}</div>
+        <div>👤 ${esc(customer)}</div>
         ${phone?`<a href="tel:${esc(phone)}">☎ ${esc(phone)}</a>`:''}
         <div>📍 ${esc(address)}</div>
-        <small>📌 พิกัด: ${esc(deliveryCoord)}</small>
+        ${mine?`<small>📌 พิกัด: ${esc(deliveryCoord)}</small>`:''}
         <div class="rider-contact-actions">
           ${phone?`<a class="rider-mini-btn" href="tel:${esc(phone)}">☎ โทรลูกค้า</a>`:''}
           ${deliveryMap?`<a class="rider-mini-btn map" href="${esc(deliveryMap)}" target="_blank" rel="noopener">🧭 นำทางไปจุดส่ง</a>`:''}
-        </div>`:`<div>📍 ${esc(approximateArea)}</div>
-        <small>🔒 ชื่อ เบอร์โทร ที่อยู่เต็ม และ GPS จะเปิดเผยเฉพาะ Rider ที่กดรับงานสำเร็จ</small>`}
+        </div>
       </div>
 
       ${waiting?`<button type="button" class="primary rider-accept-job" data-rider-accept-batch="${esc(job.batch_id)}">✅ รับงานนี้</button>`:riderProgressAction(job)}
@@ -660,14 +625,9 @@
     }
     if(box&&!quiet)box.innerHTML='<p class="muted">กำลังโหลดงาน Rider...</p>';
     try{
-      // Add group_id solely for consistent display of the shop's order reference.
-      // If the additive read-only RPC has not been deployed (or fails), keep the
-      // existing Rider inbox fully operational through its original RPC.
-      let {data,error}=await db.rpc('market_my_rider_job_inbox_ref_v1');
-      if(error){
-        console.warn('Rider order reference unavailable; using the existing inbox:',error.message||error);
-        ({data,error}=await db.rpc('market_my_rider_job_inbox'));
-      }
+      // SECURITY: Always use Phase 2 privacy-filtered RPC. Never fall back to a legacy RPC
+      // that may return full customer contact details before the rider accepts a job.
+      let {data,error}=await db.rpc('market_my_rider_job_inbox');
       if(error)throw error;
       const hydrated=await fillRiderInboxFareFallback(Array.isArray(data)?data:(data?.jobs||[]));
       const seenBatchIds=new Set();
@@ -899,10 +859,11 @@
       const {data,error}=await db.rpc('market_admin_rider_applications');
       if(error)throw error;
       const rows=data||[];
+      const ktbAdminCodes=await ktbLoadAdminCodes();
       const pending=rows.filter(x=>x.status==='pending');
       box.innerHTML=rows.length?rows.map(a=>`<div style="padding:12px 0;border-bottom:1px solid #eee">
         <div style="display:flex;justify-content:space-between;gap:10px;flex-wrap:wrap">
-          <div><b>${esc(a.display_name||'-')}</b> · <a href="tel:${esc(a.phone||'')}">${esc(a.phone||'-')}</a>
+          <div><b>${esc(a.display_name||'-')}</b>${a.status==='approved'&&ktbAdminCodes.get(String(a.user_id))?`<small class="muted" style="display:block">รหัส Rider: ${esc(ktbAdminCodes.get(String(a.user_id)))}</small>`:''} · <a href="tel:${esc(a.phone||'')}">${esc(a.phone||'-')}</a>
           <small class="muted" style="display:block">พื้นที่: ${esc(a.service_area||'-')} · ทะเบียน: ${esc(a.vehicle_plate||'-')}</small>
           <small class="muted" style="display:block">${riderApplicationStatusText(a.status)} · สมัคร ${a.created_at?new Date(a.created_at).toLocaleString('th-TH'):'-'}</small></div>
           <div>${a.status==='pending'?`<button type="button" class="primary" data-rider-approve="${a.user_id}">✅ อนุมัติ</button> <button type="button" class="danger" data-rider-reject="${a.user_id}">ไม่อนุมัติ</button>`:a.status==='approved'?`<span class="muted">${riderApplicationStatusText(a.status)}</span> <button type="button" class="danger" data-rider-revoke="${a.user_id}">🚫 ยกเลิกการอนุมัติ</button>`:`<span class="muted">${riderApplicationStatusText(a.status)}</span>`}</div>
@@ -969,8 +930,9 @@
       ]);
       if(e1)throw e1;if(e2)throw e2;
       const rows=riders||[];
+      const ktbAdminDirectoryCodes=await ktbLoadAdminCodes();
       if(status)status.textContent=`${rows.length.toLocaleString('th-TH')} คนในทะเบียน`;
-      if(list)list.innerHTML=rows.length?rows.map(r=>{const systemRider=r.source==='rider_profiles';const sourceLabel=systemRider?' · บัญชี Rider ในระบบ':r.source==='admin'?' · Admin เพิ่ม':' · พบจากงาน Delivery';const action=systemRider?`<div style="display:flex;flex-direction:column;gap:5px;align-items:flex-start"><button type="button" class="secondary" data-rider-native-test="${esc(r.id)}" ${r.enabled?'':'disabled'}>🔔 ทดสอบ Native</button><small class="muted" data-rider-native-test-result="${esc(r.id)}">${r.enabled?'ทดสอบ Android App เฉพาะคนนี้':'บัญชี Rider ยังไม่เปิดใช้งาน'}</small></div>`:`<button type="button" class="${r.enabled?'danger':'secondary'}" data-rider-toggle="${r.id}" data-rider-enabled="${r.enabled?'true':'false'}">${r.enabled?'ปิดใช้งาน':'เปิดใช้งาน'}</button>`;return `<div style="display:grid;grid-template-columns:minmax(150px,1.5fr) minmax(125px,1fr) minmax(90px,.7fr) minmax(110px,.8fr) minmax(150px,1.15fr);gap:10px;align-items:center;padding:10px 0;border-bottom:1px solid #eee"><div><b>${esc(r.display_name||'ไม่ระบุชื่อ')}</b><small class="muted" style="display:block">${r.enabled?'🟢 เปิดใช้งาน':'⚫ ปิดใช้งาน'}${sourceLabel}</small></div><div><a href="tel:${esc(r.phone||'')}">${esc(r.phone||'-')}</a></div><div><b>${Number(r.active_jobs||0)}</b><small class="muted" style="display:block">งานกำลังทำ</small></div><div><b>${Number(r.completed_jobs||0)}</b><small class="muted" style="display:block">ส่งสำเร็จ</small></div>${action}</div>`}).join(''):'<p class="muted">ยังไม่มี Rider ในระบบ</p>';
+      if(list)list.innerHTML=rows.length?rows.map(r=>{const systemRider=r.source==='rider_profiles';const sourceLabel=systemRider?' · บัญชี Rider ในระบบ':r.source==='admin'?' · Admin เพิ่ม':' · พบจากงาน Delivery';const action=systemRider?`<div style="display:flex;flex-direction:column;gap:5px;align-items:flex-start"><button type="button" class="secondary" data-rider-native-test="${esc(r.id)}" ${r.enabled?'':'disabled'}>🔔 ทดสอบ Native</button><small class="muted" data-rider-native-test-result="${esc(r.id)}">${r.enabled?'ทดสอบ Android App เฉพาะคนนี้':'บัญชี Rider ยังไม่เปิดใช้งาน'}</small></div>`:`<button type="button" class="${r.enabled?'danger':'secondary'}" data-rider-toggle="${r.id}" data-rider-enabled="${r.enabled?'true':'false'}">${r.enabled?'ปิดใช้งาน':'เปิดใช้งาน'}</button>`;return `<div style="display:grid;grid-template-columns:minmax(150px,1.5fr) minmax(125px,1fr) minmax(90px,.7fr) minmax(110px,.8fr) minmax(150px,1.15fr);gap:10px;align-items:center;padding:10px 0;border-bottom:1px solid #eee"><div><b>${esc(r.display_name||'ไม่ระบุชื่อ')}</b>${ktbAdminDirectoryCodes.get(String(r.id||r.user_id||''))?`<small class="muted" style="display:block">รหัส Rider: ${esc(ktbAdminDirectoryCodes.get(String(r.id||r.user_id||'')))}</small>`:''}<small class="muted" style="display:block">${r.enabled?'🟢 เปิดใช้งาน':'⚫ ปิดใช้งาน'}${sourceLabel}</small></div><div><a href="tel:${esc(r.phone||'')}">${esc(r.phone||'-')}</a></div><div><b>${Number(r.active_jobs||0)}</b><small class="muted" style="display:block">งานกำลังทำ</small></div><div><b>${Number(r.completed_jobs||0)}</b><small class="muted" style="display:block">ส่งสำเร็จ</small></div>${action}</div>`}).join(''):'<p class="muted">ยังไม่มี Rider ในระบบ</p>';
       const jr=recent||[];
       // Read-only Admin lookup: display the shop's group_id; keep batch_id unchanged
       // for all Rider operations. Failure here must not block the existing Admin page.
@@ -1049,6 +1011,63 @@
     }finally{
       if(btn){btn.disabled=false;btn.textContent=old;}
     }
+  }
+
+  // Admin-only Sales Report. Separate from legacy visitor analytics.
+  let adminSalesPeriod='7d';
+  let adminSalesLoading=false;
+  function ensureAdminSalesReportUI(){
+    if(profile?.role!=='admin'||$('adminSalesReport'))return;
+    const host=document.querySelector('#adminPanel .analytics-panel');
+    if(!host)return;
+    const section=document.createElement('section');
+    section.id='adminSalesReport';
+    section.className='ktb-sales-section';
+    section.innerHTML=`<div class="ktb-sales-head"><div><h3>🧾 ยอดขายและออเดอร์รวมทุกร้าน</h3><p class="muted">ข้อมูลคำสั่งซื้อผ่านโครงการโดยตรง • ไม่รวมยอดขายหน้าร้านหรือแพลตฟอร์มอื่น • ยอดขายไม่รวมค่าจัดส่ง</p></div><button type="button" class="secondary" id="adminSalesRefresh">↻ อัปเดตยอด</button></div>
+      <div class="ktb-sales-filters" aria-label="ช่วงเวลารายงานยอดขาย">
+        <button type="button" data-sales-period="today">วันนี้</button><button type="button" data-sales-period="7d" class="active">7 วัน</button><button type="button" data-sales-period="30d">30 วัน</button><button type="button" data-sales-period="all">ทั้งหมด</button>
+      </div>
+      <p class="muted ktb-sales-note">นับตามวันที่สร้างออเดอร์ (เวลาไทย) • หนึ่งร้านเท่ากับหนึ่งออเดอร์ • ออเดอร์สำเร็จไม่นับรายการคืนเงินสำเร็จ</p>
+      <div id="adminSalesStatus" class="muted" role="status" aria-live="polite">เลือกช่วงเวลาเพื่อโหลดรายงาน</div>
+      <div id="adminSalesMetrics" class="ktb-sales-metrics"></div>
+      <div class="ktb-sales-table-head"><h4>ยอดขายแยกตามร้านค้า</h4><small class="muted">เรียงยอดขายมากไปน้อย</small></div>
+      <div class="ktb-sales-table-wrap"><table class="ktb-sales-table"><thead><tr><th scope="col">ร้านค้า</th><th scope="col">ออเดอร์ทั้งหมด</th><th scope="col">สำเร็จ</th><th scope="col">ยกเลิก</th><th scope="col">กำลังดำเนินการ</th><th scope="col">ยอดขายสำเร็จ</th></tr></thead><tbody id="adminSalesShopRows"><tr><td colspan="6">รอโหลดข้อมูล</td></tr></tbody></table></div>`;
+    host.appendChild(section);
+    if(!$('ktbSalesStyle')){
+      const style=document.createElement('style');style.id='ktbSalesStyle';
+      style.textContent=`#adminPanel .ktb-sales-section{margin-top:26px;border:1px solid #dbe3ed;border-radius:17px;padding:18px;background:#fff;box-shadow:0 4px 15px rgba(15,23,42,.04)}#adminPanel .ktb-sales-head{display:flex;align-items:flex-start;justify-content:space-between;gap:12px;flex-wrap:wrap}#adminPanel .ktb-sales-head h3{margin:0 0 6px}#adminPanel .ktb-sales-head p{margin:0}#adminPanel .ktb-sales-filters{display:flex;gap:7px;flex-wrap:wrap;margin:16px 0 8px}#adminPanel .ktb-sales-filters button{padding:8px 13px;border-radius:10px;border:1px solid #cbd5e1;background:#fff;color:#334155;cursor:pointer;font:inherit}#adminPanel .ktb-sales-filters button.active{border-color:#1e3a8a;color:#1e3a8a;background:#eff6ff;font-weight:700}#adminPanel .ktb-sales-note{font-size:12px;margin:0 0 10px}#adminPanel .ktb-sales-metrics{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px;margin:13px 0 18px}#adminPanel .ktb-sales-metric{padding:14px;border-radius:12px;background:#f8fafc;border:1px solid #e2e8f0}#adminPanel .ktb-sales-metric small{display:block;color:#64748b;margin-bottom:8px}#adminPanel .ktb-sales-metric strong{font-size:21px;line-height:1.2;overflow-wrap:anywhere}#adminPanel .ktb-sales-table-head{display:flex;justify-content:space-between;align-items:center;gap:10px}#adminPanel .ktb-sales-table-head h4{margin:0 0 10px}#adminPanel .ktb-sales-table-wrap{overflow-x:auto;border:1px solid #e2e8f0;border-radius:11px}#adminPanel .ktb-sales-table{width:100%;border-collapse:collapse;min-width:720px;font-size:13px}#adminPanel .ktb-sales-table th,#adminPanel .ktb-sales-table td{padding:11px 10px;border-bottom:1px solid #edf2f7;text-align:right;white-space:nowrap}#adminPanel .ktb-sales-table th:first-child,#adminPanel .ktb-sales-table td:first-child{text-align:left;white-space:normal;min-width:150px}#adminPanel .ktb-sales-table th{background:#f8fafc;color:#475569;font-weight:700}#adminPanel .ktb-sales-table tr:last-child td{border-bottom:0}@media(max-width:700px){#adminPanel .ktb-sales-section{padding:12px}#adminPanel .ktb-sales-metrics{grid-template-columns:repeat(2,minmax(0,1fr))}#adminPanel .ktb-sales-metric strong{font-size:19px}}`;
+      document.head.appendChild(style);
+    }
+    section.querySelectorAll('[data-sales-period]').forEach(btn=>btn.addEventListener('click',()=>loadAdminSalesReport(btn.dataset.salesPeriod)));
+    $('adminSalesRefresh')?.addEventListener('click',()=>loadAdminSalesReport(adminSalesPeriod));
+  }
+  async function loadAdminSalesReport(period=adminSalesPeriod){
+    if(profile?.role!=='admin'||!db||adminSalesLoading)return;
+    ensureAdminSalesReportUI();
+    const allowed=new Set(['today','7d','30d','all']);
+    adminSalesPeriod=allowed.has(period)?period:'7d';
+    const status=$('adminSalesStatus'),metrics=$('adminSalesMetrics'),body=$('adminSalesShopRows');
+    if(!status||!metrics||!body)return;
+    document.querySelectorAll('#adminSalesReport [data-sales-period]').forEach(btn=>btn.classList.toggle('active',btn.dataset.salesPeriod===adminSalesPeriod));
+    adminSalesLoading=true;
+    status.textContent='กำลังโหลดข้อมูลยอดขาย...';
+    const refresh=$('adminSalesRefresh');if(refresh)refresh.disabled=true;
+    const number=v=>Number(v||0).toLocaleString('th-TH');
+    const baht=v=>'฿'+Number(v||0).toLocaleString('th-TH',{minimumFractionDigits:2,maximumFractionDigits:2});
+    try{
+      const {data,error}=await db.rpc('market_admin_sales_report_v1',{p_period:adminSalesPeriod});
+      if(error)throw error;
+      const report=data&&typeof data==='object'?data:{};
+      const s=report.summary||{};
+      const cells=[['ยอดขายสำเร็จ',baht(s.sales_total)],['ออเดอร์ทั้งหมด',number(s.total_orders)],['ออเดอร์สำเร็จ',number(s.completed_orders)],['ร้านที่มียอดขาย',number(s.shops_with_sales)]];
+      metrics.innerHTML=cells.map(([label,value])=>`<div class="ktb-sales-metric"><small>${esc(label)}</small><strong>${esc(value)}</strong></div>`).join('');
+      const rows=Array.isArray(report.shops)?report.shops:[];
+      body.innerHTML=rows.length?rows.map(r=>`<tr><td>${esc(r.shop_name||'ไม่ระบุชื่อร้าน')}</td><td>${number(r.total_orders)}</td><td>${number(r.completed_orders)}</td><td>${number(r.cancelled_orders)}</td><td>${number(r.in_progress_orders)}</td><td><b>${baht(r.sales_total)}</b></td></tr>`).join(''):'<tr><td colspan="6">ยังไม่มีข้อมูลร้านค้า</td></tr>';
+      status.textContent=`${({today:'วันนี้', '7d':'7 วันล่าสุด','30d':'30 วันล่าสุด',all:'ตั้งแต่เริ่มโครงการ'})[adminSalesPeriod]} · ${number(s.cancelled_orders)} ออเดอร์ยกเลิก · ${number(s.refunded_orders)} ออเดอร์คืนเงินสำเร็จ · ${number(s.in_progress_orders)} ออเดอร์กำลังดำเนินการ · ${number(s.checkout_groups)} ครั้งที่สั่งซื้อ (ชุดออเดอร์)`;
+    }catch(err){
+      status.textContent='โหลดรายงานยอดขายไม่ได้: '+(err?.message||'ไม่ทราบสาเหตุ')+' — ตรวจว่าติดตั้ง RPC market_admin_sales_report_v1 แล้ว';
+      metrics.innerHTML='';body.innerHTML='<tr><td colspan="6">รายงานยอดขายยังไม่พร้อม สถิติการใช้งานเว็บไซต์เดิมยังใช้งานได้ตามปกติ</td></tr>';
+    }finally{adminSalesLoading=false;if(refresh)refresh.disabled=false;}
   }
 
   async function loadAnalyticsDashboard(period=analyticsPeriod){
@@ -2020,7 +2039,7 @@
     {id:'explorer',icon:'🔍',title:'นักสำรวจตลาด',detail:'เปิดดูรายละเอียดร้านไม่ซ้ำกัน 5 ร้าน',goal:5},
     {id:'favorite',icon:'❤️',title:'ร้านที่ถูกใจ',detail:'เพิ่มร้านชื่นชอบ 3 ร้าน',goal:3},
     {id:'review',icon:'⭐',title:'เสียงจากลูกค้า',detail:'รีวิวร้านค้า 1 ร้าน',goal:1},
-    {id:'buyer',icon:'🛍️',title:'อุดหนุนร้านในชุมชน',detail:'มีออเดอร์สำเร็จ 1 ออเดอร์',goal:1}
+    {id:'buyer',icon:'🛍️',title:'อุดหนุนร้านในชุมชน',detail:'มีออเดอร์สำเร็จ 5 ออเดอร์',goal:5}
   ];
   let missionProgressCache=null;
   async function recordMissionShopView(shopId){
@@ -3378,6 +3397,7 @@
     panel.querySelectorAll('[data-admin-nav]').forEach(btn=>btn.classList.toggle('active',btn.dataset.adminNav===view));
     const titles={home:'ศูนย์ควบคุม Admin',shops:'จัดการร้านค้า',reports:'รายงานรีวิว',deletions:'คำขอลบบัญชี',mission:'Mission',coupons:'คูปอง',delivery:'Delivery',riders:'Rider โครงการ',analytics:'สถิติ'};
     const t=$('dashboardTitle');if(t&&profile?.role==='admin')t.textContent=titles[view]||'ศูนย์ควบคุม Admin';
+    if(view==='analytics'){ensureAdminSalesReportUI();loadAdminSalesReport();}
     if(view==='reports')loadAdminReviewReports().catch(()=>{});
     if(view==='deletions')loadAdminDeletionRequests().catch(()=>{});
     panel.scrollIntoView({behavior:'smooth',block:'start'});
@@ -3724,9 +3744,15 @@
     return hash.get('type')==='recovery'||query.get('type')==='recovery'||query.has('code');
   }
 
+  // Recovery callback must be handled before the slower storefront data requests.
+  // Otherwise a failed/slow shop query can prevent the password form appearing.
+  let passwordRecoveryInProgress=isRecoveryLink();
   async function handleRecoveryLink(){
-    if(!db||!isRecoveryLink())return;
-    await new Promise(resolve=>setTimeout(resolve,150));
+    if(!db||!passwordRecoveryInProgress)return;
+    // Do not leave an unrelated login/order dialog on top of password recovery.
+    document.querySelectorAll('.modal:not(.hidden)').forEach(modal=>{
+      if(modal.id!=='resetPasswordModal')closeModal(modal.id);
+    });
     openModal('resetPasswordModal');
   }
 
@@ -3888,6 +3914,11 @@
       if(password!==confirm)return alert('รหัสผ่านทั้งสองช่องไม่ตรงกัน');
       const btn=form.querySelector('button[type=submit]');btn.disabled=true;btn.textContent='กำลังบันทึก...';
       try{
+        // Never update an unrelated signed-in user's password without a recovery link.
+        if(!passwordRecoveryInProgress)throw new Error('กรุณาเปิดลิงก์ตั้งรหัสผ่านใหม่จากอีเมลอีกครั้ง');
+        const {data:recoverySession,error:sessionError}=await db.auth.getSession();
+        if(sessionError)throw sessionError;
+        if(!recoverySession?.session)throw new Error('ลิงก์ยังไม่ยืนยันหรือหมดอายุ กรุณาขอลิงก์ใหม่ แล้วเปิดผ่าน Chrome');
         const {error}=await db.auth.updateUser({password});
         if(error)throw error;
         alert('เปลี่ยนรหัสผ่านเรียบร้อยแล้ว กรุณาเข้าสู่ระบบด้วยรหัสผ่านใหม่');
@@ -4082,15 +4113,21 @@
       }
     });
     if(db)db.auth.onAuthStateChange((event)=>{
-      if(event==='PASSWORD_RECOVERY')setTimeout(()=>openModal('resetPasswordModal'),0);
-      setTimeout(refreshAuth,0);
+      if(event==='PASSWORD_RECOVERY'){
+        passwordRecoveryInProgress=true;
+        setTimeout(()=>{void handleRecoveryLink();},0);
+      }
+      // Avoid refreshing the whole storefront during password recovery.
+      if(!passwordRecoveryInProgress)setTimeout(refreshAuth,0);
     });
   }
 
   async function start(){
     renderHoursEditor();initMaps();bindEvents();
+    // Show password reset immediately; do not wait for all marketplace queries.
+    if(passwordRecoveryInProgress)void handleRecoveryLink();
     trackAnalytics('page_view');
-    try{await loadCategories();await loadReviewStats();await loadPromotions();await loadShopIndex();await loadPublicShops({reset:true});renderShops();renderRecommended();await refreshAuth();ensureCouponWalletUI();await handleRecoveryLink();await handleShopDirectLink();showMissionWelcomeOncePerRound().catch(()=>{});}
+    try{await loadCategories();await loadReviewStats();await loadPromotions();await loadShopIndex();await loadPublicShops({reset:true});renderShops();renderRecommended();await refreshAuth();ensureCouponWalletUI();if(!passwordRecoveryInProgress){await handleShopDirectLink();showMissionWelcomeOncePerRound().catch(()=>{});}}
     catch(err){console.error(err);showNotice('เกิดข้อผิดพลาด: '+err.message,true);}
     finally{document.documentElement.classList.remove('shop-link-pending');}
   }
@@ -4123,7 +4160,6 @@
       input?.click();
       return;
     }
-    if(e.target.closest?.('[data-rider-items-retry]')){e.preventDefault();loadRiderJobInbox({quiet:true});return;}
     if(e.target.closest?.('#refreshRiderJobsBtn')){e.preventDefault();loadRiderJobInbox();return;}
   });
 
@@ -4421,8 +4457,8 @@ document.addEventListener('DOMContentLoaded', () => {
         <div class="install-choice-section">
           <h3>🤖 สำหรับ Android</h3>
           <p>แนะนำให้ใช้แอป Android เพื่อรับการแจ้งเตือนออเดอร์และงาน Rider ได้เต็มรูปแบบ</p>
-          <a class="btn primary" href="./downloads/app-release.apk">⬇️ ดาวน์โหลดแอป Android</a>
-          <p class="install-note"><strong>หลังดาวน์โหลดเสร็จ</strong> ให้เปิดรายการดาวน์โหลด แล้วกดไฟล์ <strong>app-release.apk</strong> เพื่อเริ่มติดตั้งแอป<br>หาก Android แจ้งเตือนเรื่องความปลอดภัย ให้อนุญาต “ติดตั้งแอปที่ไม่รู้จัก” เพื่อดำเนินการต่อ<br><small>เวอร์ชัน v1.0</small></p>
+          <a class="btn primary" href="https://play.google.com/store/apps/details?id=com.krathumbaen.together&amp;pcampaignid=web_share" target="_blank" rel="noopener noreferrer">▶️ ติดตั้งผ่าน Google Play</a>
+          <p class="install-note">กดปุ่มด้านบนเพื่อเปิด Google Play Store แล้วเลือก <strong>ติดตั้ง</strong> หรือ <strong>อัปเดต</strong> หากมีแอปอยู่แล้ว</p>
           ${androidExtra}
         </div>
 

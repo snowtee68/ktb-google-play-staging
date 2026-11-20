@@ -172,6 +172,153 @@ body:not(.guest-session) .site-header #guestSignUpBtn{display:none!important}
 .rider-shop-preparing{display:inline-block;margin:5px 0 6px;padding:5px 8px;border-radius:999px;background:#fff5db;color:#7a5700;font-size:12px;font-weight:800}
 .rider-stop-ready{border-left:4px solid #2e9b50!important}
 </style>
+<style id="ktbDeliveryCatalogStyles">
+.ktb-delivery-entry{padding:14px 16px 4px;text-align:center}.ktb-delivery-entry-button{background:#efaa29;color:#241805;border:0;border-radius:17px;padding:15px 26px;box-shadow:0 5px 17px #aa6c2350;font-weight:900;font-size:clamp(18px,4vw,24px);cursor:pointer;max-width:100%;width:min(510px,100%)}.ktb-delivery-entry-button small{display:block;font-size:12px;margin-top:4px;font-weight:600}.ktb-delivery-catalog{padding:20px 0 85px;min-height:60vh}.ktb-delivery-head{text-align:center;margin-bottom:18px}.ktb-delivery-head h2{margin:10px 0 4px}.ktb-delivery-head p{color:#666}.ktb-delivery-back{display:block;border:1px solid #ddd;border-radius:10px;background:white;padding:10px 16px;cursor:pointer}.ktb-delivery-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px}.ktb-delivery-card{background:#fff;border:1px solid #e8e0d7;border-radius:14px;overflow:hidden;display:flex;flex-direction:column;min-width:0;box-shadow:0 3px 12px #0000000b}.ktb-delivery-thumb{width:100%;aspect-ratio:5/3;object-fit:cover;background:#f3eee8}.ktb-delivery-fallback{aspect-ratio:5/3;display:grid;place-items:center;background:#f3eee8;font-size:30px}.ktb-delivery-card-content{padding:10px;display:flex;flex-direction:column;flex:1;gap:9px}.ktb-delivery-name{font-size:14px;line-height:1.4;font-weight:800;overflow-wrap:anywhere;flex:1}.ktb-delivery-buy{background:#9e1720;color:#fff;border:0;border-radius:10px;padding:11px 8px;font:800 14px inherit;cursor:pointer;min-height:43px}.ktb-delivery-pages{display:flex;justify-content:center;gap:9px;flex-wrap:wrap;margin-top:22px}.ktb-delivery-pages button{border:1px solid #ddd;background:#fff;padding:9px 13px;border-radius:10px;cursor:pointer}.ktb-delivery-pages button[aria-current="page"]{background:#9e1720;color:#fff}.ktb-delivery-pages button:disabled{opacity:.4;cursor:default}body.ktb-delivery-mode #top > :not(#ktbDeliveryCatalog){display:none!important}body.ktb-delivery-mode #ktbDeliveryCatalog{display:block!important}body.ktb-delivery-mode .below-banner-actions,body.ktb-delivery-mode .market-photo-banner{display:none!important}
+@media(min-width:760px){.ktb-delivery-grid{grid-template-columns:repeat(3,minmax(0,1fr));gap:16px}.ktb-delivery-card-content{padding:14px}.ktb-delivery-name{font-size:16px}}
+/* Compact Shop Now button on mobile; desktop styles unchanged */
+@media(max-width:759px){
+  .ktb-delivery-entry{padding:10px 12px 3px;text-align:center}
+  .ktb-delivery-entry-button{
+    display:inline-flex;align-items:center;justify-content:center;
+    width:auto;max-width:calc(100vw - 32px);
+    padding:10px 17px;border-radius:11px;
+    font-size:15px;line-height:1.3;font-weight:800;
+    box-shadow:0 2px 7px #aa6c2326;
+    min-height:44px;
+  }
+  .ktb-delivery-entry-button small{display:none}
+}
+
+</style>
+
+<style id="ktbDeliveryButtonCTAUpgrade">
+/* Visual-only enhancement for the existing Delivery catalog button.
+   Keep #ktbOpenDeliveryCatalog and its original JavaScript click handler. */
+.ktb-delivery-entry{padding:18px 16px 9px;text-align:center}
+#ktbOpenDeliveryCatalog.ktb-delivery-entry-button{
+  appearance:none;display:inline-flex;flex-direction:column;align-items:center;justify-content:center;
+  gap:5px;width:min(540px,100%);max-width:100%;min-height:80px;
+  padding:14px 24px;border:3px solid #fff6c5;border-radius:19px;
+  background:linear-gradient(180deg,#ffdf64 0%,#ffbd26 100%);
+  color:#362000;font-family:inherit;font-size:clamp(18px,3vw,23px);font-weight:900;
+  line-height:1.3;letter-spacing:.1px;cursor:pointer;text-align:center;
+  box-shadow:0 5px 0 #a85e05,0 9px 23px rgba(117,64,0,.26),inset 0 1px 0 rgba(255,255,255,.82);
+  transition:transform .14s ease,box-shadow .14s ease,filter .14s ease;
+  -webkit-tap-highlight-color:transparent;touch-action:manipulation
+}
+#ktbOpenDeliveryCatalog .ktb-delivery-entry-main{display:flex;align-items:center;justify-content:center;gap:12px}
+#ktbOpenDeliveryCatalog .ktb-delivery-entry-emoji{font-size:1.25em;line-height:1}
+#ktbOpenDeliveryCatalog .ktb-delivery-entry-arrow{display:inline-grid;place-items:center;width:31px;height:31px;border-radius:999px;background:#432600;color:#fff;font-size:19px;line-height:1}
+#ktbOpenDeliveryCatalog small{display:block;margin:0;font-size:clamp(11px,1.8vw,13px);font-weight:700;color:#593808;line-height:1.35}
+#ktbOpenDeliveryCatalog:hover{filter:brightness(1.04);transform:translateY(-2px);box-shadow:0 7px 0 #a85e05,0 12px 28px rgba(117,64,0,.32),inset 0 1px 0 rgba(255,255,255,.82)}
+#ktbOpenDeliveryCatalog:active{transform:translateY(3px);box-shadow:0 2px 0 #a85e05,0 4px 12px rgba(117,64,0,.22)}
+#ktbOpenDeliveryCatalog:focus-visible{outline:4px solid #b91c1c;outline-offset:4px}
+@media(max-width:759px){
+  .ktb-delivery-entry{padding:14px 12px 7px}
+  #ktbOpenDeliveryCatalog.ktb-delivery-entry-button{display:inline-flex;width:min(480px,100%);min-height:72px;padding:12px 13px;border-radius:17px;font-size:clamp(16px,4.5vw,19px);box-shadow:0 4px 0 #a85e05,0 8px 18px rgba(117,64,0,.26)}
+  #ktbOpenDeliveryCatalog .ktb-delivery-entry-main{gap:8px}
+  #ktbOpenDeliveryCatalog .ktb-delivery-entry-arrow{width:27px;height:27px;font-size:17px}
+  #ktbOpenDeliveryCatalog small{display:block;font-size:11px}
+}
+@media(prefers-reduced-motion:reduce){#ktbOpenDeliveryCatalog{transition:none!important}}
+</style>
+
+<style id="ktbFacebookBannerButtonStyle">
+/* Facebook page link over the existing homepage banner. */
+.market-photo-banner{position:relative}
+.ktb-facebook-banner-link{
+  position:absolute;right:clamp(10px,2vw,22px);bottom:clamp(10px,2vw,22px);
+  z-index:2;display:inline-flex;align-items:center;justify-content:center;gap:8px;
+  min-height:44px;box-sizing:border-box;padding:10px 17px;
+  border:2px solid #fff;border-radius:999px;
+  color:#fff!important;background:#1877f2;text-decoration:none!important;
+  font:800 clamp(12px,2.6vw,16px)/1.2 system-ui,-apple-system,"Segoe UI",Tahoma,sans-serif;
+  box-shadow:0 3px 12px rgba(0,0,0,.32);
+  max-width:calc(100% - 20px);
+}
+.ktb-facebook-banner-link:hover,.ktb-facebook-banner-link:focus-visible{background:#0c5bca}
+.ktb-facebook-banner-link:focus-visible{outline:3px solid #ffcb4c;outline-offset:3px}
+.ktb-facebook-banner-link svg{width:20px;height:20px;flex:none;fill:currentColor}
+@media(max-width:420px){
+  .ktb-facebook-banner-link{right:8px;bottom:8px;padding:8px 10px;gap:6px;min-height:40px;font-size:12px}
+  .ktb-facebook-banner-link svg{width:17px;height:17px}
+}
+</style>
+<style id="ktbOrderAuthModalLayerFix">
+/* Keep the login/signup dialog above the dynamically created order dialog. */
+#authModal:not(.hidden){position:fixed!important;z-index:2147483000!important}
+</style>
+<style id="ktbRecoveryModalLayerFix">
+/* Password recovery always takes priority over the regular login and order panels. */
+#resetPasswordModal:not(.hidden){position:fixed!important;z-index:2147483100!important}
+</style>
+
+<style id="ktbShopOrderCta20261119">
+/* V2: single-column primary CTA. The actual order button is still owned by order.js. */
+#shopDetailModal #detailSummary .detail-order-cta-row{
+  display:flex!important;flex-direction:column!important;align-items:stretch!important;
+  justify-content:flex-start!important;gap:0!important;
+  width:100%!important;max-width:100%!important;box-sizing:border-box!important;
+  margin:18px 0 14px!important;padding:17px 14px!important;
+  border:2px solid #f1c4c8!important;border-radius:18px!important;
+  background:#fffafa!important;box-shadow:0 6px 19px rgba(115,20,25,.08)!important;
+  text-align:center!important;
+}
+#shopDetailModal .ktb-shop-order-heading{
+  display:block!important;width:100%!important;margin:0 0 8px!important;
+  color:#7d1d25;font:800 16px/1.4 Prompt,sans-serif;text-align:center;
+}
+#shopDetailModal .ktb-shop-benefit{
+  display:block!important;width:100%!important;margin:0 0 13px!important;
+  color:#17643c;font:900 clamp(17px,4.6vw,22px)/1.4 Prompt,sans-serif;
+  text-align:center;
+}
+#shopDetailModal #detailSummary .detail-order-cta-row button[data-market-order-shop]{
+  display:flex!important;align-items:center!important;justify-content:center!important;
+  width:100%!important;max-width:100%!important;min-width:0!important;
+  min-height:68px!important;box-sizing:border-box!important;
+  margin:0!important;padding:14px 16px!important;
+  border:2px solid #9a0e1b!important;border-bottom:5px solid #7c111b!important;
+  border-radius:15px!important;background:#bd1426!important;color:#fff!important;
+  box-shadow:0 7px 18px rgba(138,13,27,.30)!important;
+  font:900 clamp(18px,4.9vw,23px)/1.3 Prompt,sans-serif!important;
+  text-align:center!important;white-space:normal!important;overflow-wrap:break-word!important;
+  cursor:pointer!important;transition:filter .12s,transform .12s!important;
+}
+#shopDetailModal #detailSummary .detail-order-cta-row button[data-market-order-shop]:hover{filter:brightness(1.07)!important}
+#shopDetailModal #detailSummary .detail-order-cta-row button[data-market-order-shop]:active{transform:translateY(2px)!important}
+#shopDetailModal #detailSummary .detail-order-cta-row button[data-market-order-shop]:focus-visible{outline:3px solid #f5b942!important;outline-offset:3px!important}
+#shopDetailModal .ktb-shop-price-note{
+  display:block!important;width:100%!important;margin:11px 0 0!important;
+  color:#57545a!important;font:500 12px/1.55 Prompt,sans-serif!important;text-align:center!important;
+}
+#shopDetailModal .ktb-shop-other-channels{
+  margin:17px 0 10px;color:#69616a;font:600 13px/1.5 Prompt,sans-serif;text-align:center;
+}
+/* Keep alternate providers usable without letting their solid colors overpower the project CTA. */
+#shopDetailModal #detailSummary .detail-order-grid{
+  display:grid!important;grid-template-columns:repeat(3,minmax(0,1fr))!important;
+  gap:8px!important;margin:0 0 14px!important;width:100%!important;
+}
+#shopDetailModal #detailSummary .detail-order-grid .detail-order{
+  display:flex!important;align-items:center!important;justify-content:center!important;
+  width:100%!important;min-width:0!important;min-height:52px!important;
+  box-sizing:border-box!important;padding:9px 6px!important;
+  border:1px solid #d8cfd0!important;border-radius:11px!important;
+  background:#fff!important;color:#59454a!important;
+  box-shadow:none!important;font:700 12px/1.4 Prompt,sans-serif!important;
+  text-decoration:none!important;text-align:center!important;white-space:normal!important;
+  overflow-wrap:anywhere!important;
+}
+#shopDetailModal #detailSummary .detail-order-grid .detail-order:hover{background:#fff2f3!important;border-color:#b72231!important}
+#shopDetailModal #detailSummary .detail-order-grid .detail-order:focus-visible{outline:3px solid #f5b942!important;outline-offset:2px!important}
+@media(max-width:380px){
+  #shopDetailModal #detailSummary .detail-order-cta-row{padding:14px 10px!important}
+  #shopDetailModal #detailSummary .detail-order-grid{gap:5px!important}
+  #shopDetailModal #detailSummary .detail-order-grid .detail-order{font-size:11px!important;padding:9px 3px!important}
+}
+@media(prefers-reduced-motion:reduce){#shopDetailModal #detailSummary .detail-order-cta-row button[data-market-order-shop]{transition:none!important}}
+</style>
 </head>
 <body class="guest-session" data-shop-welcome="ยินดีต้อนรับสู่ร้าน…">
 <header class="site-header">
@@ -206,8 +353,14 @@ body:not(.guest-session) .site-header #guestSignUpBtn{display:none!important}
 
   <section class="market-photo-banner" aria-label="กระทุ่มแบนไปด้วยกัน ค้นหาร้านง่าย ร้านรับรายได้เต็ม ๆ">
   <img src="assets/krathumbaen-market-banner.jpg?v=0.5.22.147-R8.8.2-home-cover-chibi" alt="กระทุ่มแบนไปด้วยกัน ค้นหาร้านง่าย ร้านรับรายได้เต็ม ๆ" loading="eager" decoding="async">
+  <a class="ktb-facebook-banner-link" href="https://www.facebook.com/ktb.together/" target="_blank" rel="noopener noreferrer" aria-label="ติดตามข่าวสารกระทุ่มแบนไปด้วยกันบน Facebook">
+    <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M22 12a10 10 0 1 0-11.56 9.88v-6.99H7.9V12h2.54V9.8c0-2.51 1.49-3.89 3.78-3.89 1.09 0 2.23.2 2.23.2v2.46H15.2c-1.24 0-1.63.77-1.63 1.56V12h2.78l-.45 2.89h-2.33v6.99A10 10 0 0 0 22 12Z"/></svg>
+    <span>ติดตามข่าวสาร</span>
+  </a>
 </section>
 
+<div class="container ktb-delivery-entry"><button type="button" id="ktbOpenDeliveryCatalog" class="ktb-delivery-entry-button" aria-label="กดสั่งซื้อสินค้า เลือกร้านที่เปิดรับเดลิเวอรี"><span class="ktb-delivery-entry-main"><span aria-hidden="true" class="ktb-delivery-entry-emoji">🛒</span><span>กดสั่งซื้อสินค้าเลย</span><span aria-hidden="true" class="ktb-delivery-entry-arrow">➜</span></span><small>🛵 เลือกร้านที่เปิดรับออเดอร์ · ส่งถึงบ้าน</small></button></div>
+<section id="ktbDeliveryCatalog" class="ktb-delivery-catalog" hidden aria-label="ร้านที่เปิดรับ Delivery ตอนนี้"><div class="container"><div class="ktb-delivery-head"><button id="ktbDeliveryBack" type="button" class="ktb-delivery-back">← กลับหน้าหลัก</button><h2>🛵 สั่งเลย! ส่งถึงบ้าน</h2><p>แสดงเฉพาะร้านที่กำลังเปิดรับออเดอร์ Delivery</p></div><p id="ktbDeliveryMessage" role="status"></p><div id="ktbDeliveryGrid" class="ktb-delivery-grid"></div><nav id="ktbDeliveryPages" class="ktb-delivery-pages" aria-label="หน้าร้าน Delivery"></nav></div></section>
 <section class="home-discovery" aria-label="ค้นหาร้านและหมวดหมู่">
   <div class="container">
     <div class="home-search-card">
@@ -466,10 +619,10 @@ body:not(.guest-session) .site-header #guestSignUpBtn{display:none!important}
   </div>
 </div>
 
-<div id="authModal" class="modal hidden"><div class="backdrop" data-close="authModal"></div><div class="modal-card small"><button class="close" data-close="authModal">×</button><h2>เข้าสู่ระบบ / สมัครสมาชิก</h2><p>เลือกเข้าสู่ระบบด้วยอีเมล หรือเบอร์โทรศัพท์</p><form id="authForm"><div class="auth-method-switch"><button type="button" class="auth-method active" data-auth-method="email">📧 อีเมล</button><button type="button" class="auth-method" data-auth-method="phone">📱 เบอร์โทร</button></div><input type="hidden" name="auth_method" value="email"><label id="authEmailLabel">อีเมล<input name="email" type="email" autocomplete="email"></label><label id="authPhoneLabel" class="hidden">เบอร์โทรศัพท์<input name="phone" type="tel" inputmode="numeric" autocomplete="tel" placeholder="0812345678"></label><div id="authPhoneHelp" class="auth-help hidden">ไม่ใช้ OTP/SMS · ใช้เบอร์โทร + รหัสผ่าน</div><label>ชื่อที่ใช้แสดงในระบบ <small class="muted">(ใช้ตอนสมัครสมาชิก)</small><input name="display_name" type="text" maxlength="50" autocomplete="nickname" placeholder="เช่น พี่นัท / เจ๊ภา / วรวุฒิ"></label><label>รหัสผ่าน<span class="password-field"><input name="password" type="password" minlength="6" required><button type="button" class="password-toggle" data-password-toggle aria-label="แสดงรหัสผ่าน" title="แสดงรหัสผ่าน">👁️</button></span></label><div id="signupTermsRow" class="auth-help" style="margin:10px 0">
+<div id="authModal" class="modal hidden"><div class="backdrop" data-close="authModal"></div><div class="modal-card small"><button class="close" data-close="authModal">×</button><h2 id="ktbAuthWelcomeTitle" style="text-align:center"><span style="display:block">ยินดีต้อนรับสู่</span><span style="display:block">กระทุ่มแบนไปด้วยกัน ❤️</span></h2><p id="ktbAuthWelcomeDetail">เข้าสู่ระบบหรือสมัครสมาชิก เพื่อสั่งสินค้าจากร้านค้าในชุมชนและติดตามสถานะคำสั่งซื้อได้สะดวก</p><form id="authForm"><div class="auth-method-switch"><button type="button" class="auth-method active" data-auth-method="email">📧 อีเมล</button><button type="button" class="auth-method" data-auth-method="phone">📱 เบอร์โทร</button></div><input type="hidden" name="auth_method" value="email"><label id="authEmailLabel">อีเมล<input name="email" type="email" autocomplete="email"></label><label id="authPhoneLabel" class="hidden">เบอร์โทรศัพท์<input name="phone" type="tel" inputmode="numeric" autocomplete="tel" placeholder="0812345678"></label><div id="authPhoneHelp" class="auth-help hidden">ไม่ใช้ OTP/SMS · ใช้เบอร์โทร + รหัสผ่าน</div><label>ชื่อที่ใช้แสดงในระบบ <small class="muted">(ใช้ตอนสมัครสมาชิก)</small><input name="display_name" type="text" maxlength="50" autocomplete="nickname" placeholder="เช่น พี่นัท / เจ๊ภา / วรวุฒิ"></label><label>รหัสผ่าน<span class="password-field"><input name="password" type="password" minlength="6" required><button type="button" class="password-toggle" data-password-toggle aria-label="แสดงรหัสผ่าน" title="แสดงรหัสผ่าน">👁️</button></span></label><div id="signupTermsRow" class="auth-help" style="margin:10px 0">
 <label class="check" style="align-items:flex-start"><input id="signupTermsAccepted" type="checkbox" style="margin-top:4px"> <span>สำหรับการสมัครสมาชิก ฉันได้อ่านและยอมรับ <button type="button" id="openTermsBtn" class="text-button" style="display:inline;padding:0">ข้อตกลงและเงื่อนไขการใช้งาน</button></span></label>
 </div>
-<div class="row"><button type="submit" class="primary">เข้าสู่ระบบ</button><button type="button" id="signUpBtn" class="ghost">สมัครสมาชิก</button></div><button type="button" id="forgotPasswordBtn" class="text-button">ลืมรหัสผ่าน</button></form></div></div>
+<div class="row"><button type="submit" class="primary">เข้าสู่ระบบ</button><button type="button" id="signUpBtn" class="ghost">สมัครสมาชิกใหม่</button></div><p class="auth-help" style="font-size:12px;line-height:1.6;margin:12px 0 4px">🔒 ข้อมูลติดต่อและที่อยู่จัดส่งใช้สำหรับดำเนินการคำสั่งซื้อและจัดส่งตาม <a href="privacy.html" target="_blank" rel="noopener noreferrer">นโยบายความเป็นส่วนตัว</a></p><button type="button" id="forgotPasswordBtn" class="text-button">ลืมรหัสผ่าน</button></form></div></div>
 
 <div id="shopModal" class="modal hidden"><div class="backdrop" data-close="shopModal"></div><div class="modal-card"><button class="close" data-close="shopModal">×</button><h2 id="shopFormTitle">เพิ่มร้านของฉัน</h2><p>ข้อมูลจะรอการตรวจสอบก่อนเผยแพร่</p><form id="shopForm"><input type="hidden" name="id"><div class="form-grid">
 <label>ชื่อร้าน *<input name="name" required></label><label>หมวดหมู่ *<select name="category_id" id="categorySelect" required></select></label>
@@ -549,7 +702,7 @@ if ('serviceWorker' in navigator) {
 }
 </script>
 <script src="native-push-bridge.js?v=0.5.22.147-R8.1-native-push-hardening"></script>
-<script src="app.js?v=ktb-privacy-area-v4-20261102-r1"></script>
+<script src="app.js?v=ktb-recovery-modal-20261120"></script>
 
 <nav class="unified-app-dock" aria-label="เมนูหลัก">
   <button type="button" data-dock-action="home" aria-label="หน้าหลัก">
@@ -566,7 +719,8 @@ if ('serviceWorker' in navigator) {
   </button>
 </nav>
 
-<script src="order.js?v=ktb-staging-seller-safe-rpc-20261102-r1"></script>
+<script src="order.js?v=0.5.22.147-R8.2-realtime-safe-phase1-enter-20261101"></script>
+<script src="delivery-catalog.js?v=1.0.0"></script>
 
 
 <script>
@@ -813,5 +967,88 @@ document.addEventListener('click', function (event) {
 })();
 </script>
 
+<script id="ktbOrderAuthModalLayerBridge">
+/* UI-only: temporarily suspend the order overlay while login/signup is open.
+   Does not close checkout, discard cart state, or change order/auth requests. */
+(function(){
+  const auth=document.getElementById('authModal');
+  if(!auth)return;
+  let suspended=null;
+  let previousVisibility='';
+  let previousPointerEvents='';
+  function syncOrderOverlay(){
+    const order=document.getElementById('marketOrderModal');
+    const loginOpen=!auth.classList.contains('hidden') && !auth.hidden;
+    const title=document.getElementById('ktbAuthWelcomeTitle');
+    const detail=document.getElementById('ktbAuthWelcomeDetail');
+    // If a customer starts login from the order screen, explain why login is required.
+    // The order overlay remains suspended by the existing bridge below.
+    if(loginOpen){
+      const fromOrder=Boolean(order&&!order.classList.contains('hidden'));
+      if(title){
+        if(fromOrder)title.textContent='อีกขั้นตอนเดียว ก่อนสั่งซื้อ 🛒';
+        else title.innerHTML='<span style="display:block">ยินดีต้อนรับสู่</span><span style="display:block">กระทุ่มแบนไปด้วยกัน ❤️</span>';
+      }
+      if(detail)detail.textContent=fromOrder
+        ?'เข้าสู่ระบบหรือสมัครสมาชิก เพื่อยืนยันคำสั่งซื้อและติดตามสถานะได้สะดวก'
+        :'เข้าสู่ระบบหรือสมัครสมาชิก เพื่อสั่งสินค้าจากร้านค้าในชุมชนและติดตามสถานะคำสั่งซื้อได้สะดวก';
+    }
+    if(loginOpen && order && !order.classList.contains('hidden')){
+      if(suspended!==order){
+        if(suspended){suspended.style.visibility=previousVisibility;suspended.style.pointerEvents=previousPointerEvents;}
+        suspended=order;
+        previousVisibility=order.style.visibility;
+        previousPointerEvents=order.style.pointerEvents;
+      }
+      order.style.visibility='hidden';
+      order.style.pointerEvents='none';
+    }else if(suspended){
+      suspended.style.visibility=previousVisibility;
+      suspended.style.pointerEvents=previousPointerEvents;
+      suspended=null;
+    }
+  }
+  new MutationObserver(syncOrderOverlay).observe(auth,{attributes:true,attributeFilter:['class','hidden','style']});
+  syncOrderOverlay();
+})();
+</script>
+
+<script id="ktbShopOrderCtaEnhancement20261119">
+/* Decorate the existing order button after order.js inserts it. No click handlers are replaced. */
+(function(){
+  const detail=document.getElementById('detailSummary');
+  if(!detail)return;
+  function enhance(){
+    const row=detail.querySelector('.detail-order-cta-row');
+    const btn=row?.querySelector('button[data-market-order-shop]');
+    if(row&&btn&&!row.dataset.ktbShopOrderEnhanced){
+      row.dataset.ktbShopOrderEnhanced='1';
+      const title=document.createElement('div');
+      title.className='ktb-shop-order-heading';
+      title.textContent='สั่งจากร้านนี้ผ่านโครงการของเรา';
+      row.insertBefore(title,btn);
+      btn.textContent='🛒 สั่งซื้อผ่านกระทุ่มแบนไปด้วยกัน  ➜';
+      const benefit=document.createElement('div');
+      benefit.className='ktb-shop-benefit';
+      benefit.textContent='✓ ราคาสินค้าเท่าหน้าร้าน';
+      row.insertBefore(benefit,btn);
+      const note=document.createElement('p');
+      note.className='ktb-shop-price-note';
+      note.textContent='ร้านค้าไม่เสีย GP • ค่าจัดส่งคิดแยกตามระยะทาง';
+      row.appendChild(note);
+    }
+    const other=detail.querySelector('.detail-order-grid');
+    if(other&&!other.previousElementSibling?.classList.contains('ktb-shop-other-channels')){
+      const label=document.createElement('div');
+      label.className='ktb-shop-other-channels';
+      label.textContent='หรือเลือกสั่งผ่านช่องทางอื่นของร้าน';
+      other.parentNode.insertBefore(label,other);
+    }
+  }
+  const observer=new MutationObserver(enhance);
+  observer.observe(detail,{childList:true,subtree:true});
+  enhance();
+})();
+</script>
 </body>
 </html>
