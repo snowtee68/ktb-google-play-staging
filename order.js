@@ -1274,15 +1274,25 @@ if(e.target.closest('#showDeliveryFareInfoBtn'))return showDeliveryFareInfo(fals
       if(btn){btn.disabled=false;btn.textContent='สร้างออเดอร์'}
       return alert('สร้างออเดอร์สำเร็จแต่ระบบไม่พบรหัสชุดคำสั่งซื้อ กรุณาเปิดออเดอร์ของฉันเพื่อตรวจสอบ');
     }
-    if(method==='delivery'&&checkoutDeliveryEstimate?.fare>0){
+    if(method==='delivery'){
+      // Security: the backend re-reads the customer group and shops, calls ORS itself,
+      // computes the authoritative fare, then saves it with the service role.
+      // The client must never supply a trusted delivery_fee or distance_km.
       try{
-        const {error:estimateError}=await db.rpc('market_set_group_delivery_estimate',{
-          p_group_id:createdGroupId,
-          p_delivery_fee:checkoutDeliveryEstimate.fare,
-          p_distance_km:checkoutDeliveryEstimate.distance
+        const {data:verified,error:quoteError}=await db.functions.invoke('market-secure-delivery-estimate',{
+          body:{group_id:createdGroupId}
         });
-        if(estimateError)console.warn('save delivery estimate:',estimateError.message||estimateError);
-      }catch(err){console.warn('save delivery estimate:',err?.message||err)}
+        if(quoteError||!verified?.ok)throw new Error(verified?.error||quoteError?.message||'secure_estimate_failed');
+        if(Math.abs(Number(verified.delivery_fee)-Number(checkoutDeliveryEstimate?.fare))>0.001){
+          console.warn('Client preview and server fare differ',checkoutDeliveryEstimate?.fare,verified.delivery_fee);
+          alert(`ระบบตรวจสอบค่าส่งอีกครั้งได้ ${money(verified.delivery_fee)} บาท (ราคาแสดงก่อนหน้า ${money(checkoutDeliveryEstimate?.fare)} บาท) กรุณาตรวจสอบก่อนชำระเงิน`);
+        }
+      }catch(err){
+        console.error('Secure delivery estimate failed:',err?.message||err);
+        if(btn){btn.disabled=false;btn.textContent='สร้างออเดอร์';}
+        alert('สร้างคำสั่งซื้อแล้ว แต่ยังยืนยันค่าจัดส่งจากเซิร์ฟเวอร์ไม่ได้ กรุณาอย่าเพิ่งชำระเงินหรือเรียก Rider และติดต่อผู้ดูแล พร้อมเลขชุดคำสั่งซื้อ '+String(createdGroupId));
+        return;
+      }
     }
     const couponIds=selectedCheckoutCouponIds();
     if(couponIds.length){
