@@ -1160,6 +1160,30 @@ if(e.target.closest('#showDeliveryFareInfoBtn'))return showDeliveryFareInfo(fals
     walk([],items);
     return best||items;
   }
+  // STAGING ONLY: calculate validated road distances through the Supabase ORS proxy.
+  // Never fall back silently to straight-line fares when routing is unavailable.
+  async function orsDeliveryRoute(pickups,drop){
+    if(!Array.isArray(pickups)||pickups.length<1||pickups.length>MAX_PICKUPS)throw new Error('จำนวนร้านค้าไม่ถูกต้อง');
+    if(!session?.access_token)throw new Error('กรุณาเข้าสู่ระบบก่อนคำนวณค่าจัดส่ง');
+    const compact=pickups.map(p=>({shop_id:p.shop_id,lat:Number(p.lat),lng:Number(p.lng)}));
+    const {data,error}=await db.functions.invoke('market-road-route',{
+      body:{pickups:compact,dropoff:{lat:Number(drop.lat),lng:Number(drop.lng)}}
+    });
+    if(error||!data?.ok){
+      console.warn('ORS routing failed',error?.message||data?.error||'unknown');
+      throw new Error('ไม่สามารถคำนวณระยะทางถนนจริงได้ กรุณาลองใหม่');
+    }
+    const ids=data.ordered_shop_ids;
+    const meters=Number(data.distance_m);
+    const byId=new Map(pickups.map(p=>[String(p.shop_id).toLowerCase(),p]));
+    if(!Array.isArray(ids)||ids.length!==pickups.length||new Set(ids.map(x=>String(x).toLowerCase())).size!==pickups.length||
+       !ids.every(id=>byId.has(String(id).toLowerCase()))||!Number.isFinite(meters)||meters<=0){
+      throw new Error('ORS ส่งข้อมูลเส้นทางไม่ถูกต้อง');
+    }
+    const ordered=ids.map(id=>byId.get(String(id).toLowerCase()));
+    const km=meters/1000;
+    return {km,fare:fareFor(km,ordered.length),pickups:ordered};
+  }
   async function precheckDeliveryRoute(groups,lat,lng){
     const ids=[...new Set((groups||[]).map(g=>g.shop_id).filter(Boolean))];
     if(!ids.length)throw new Error('ไม่พบร้านค้าในตะกร้า');
@@ -1173,10 +1197,7 @@ if(e.target.closest('#showDeliveryFareInfoBtn'))return showDeliveryFareInfo(fals
       pickups.push({type:'pickup',label:sh.name,lat:slat,lng:slng,shop_id:sh.id});
     }
     const drop={type:'dropoff',label:'จุดส่งลูกค้า',lat:Number(lat),lng:Number(lng)};
-    const ordered=bestPickupRoute(pickups,drop);
-    const km=routeKm([...ordered,drop]);
-    const fare=fareFor(km,ordered.length);
-    return {km,fare,pickups:ordered};
+    return await orsDeliveryRoute(pickups,drop);
   }
   let checkoutFarePreviewSeq=0,lastCheckoutDeliveryEstimate=null;
   async function refreshCheckoutFarePreview(){
@@ -2451,9 +2472,10 @@ if(e.target.closest('#showDeliveryFareInfoBtn'))return showDeliveryFareInfo(fals
       const pickups=Array.isArray(prep.pickups)?prep.pickups:[];
       if(!pickups.length)throw new Error('ไม่พบจุดรับสินค้าสำหรับเรียก Rider');
       const drop=prep.dropoff||{};
-      const stops=[...pickups,drop];
-      const km=routeKm(stops),fare=fareFor(km,pickups.length);
-      if(!fare)throw new Error(`เส้นทางรวมเกิน ${MAX_ROUTE_KM} กม. ซึ่งเกินพื้นที่ให้บริการของระบบ Rider`);
+      const road=await orsDeliveryRoute(pickups,drop);
+      const stops=[...road.pickups,drop];
+      const km=road.km,fare=road.fare;
+      if(!fare)throw new Error(`เส้นทางตามถนนจริงเกิน ${MAX_ROUTE_KM} กม. ซึ่งเกินพื้นที่ให้บริการของระบบ Rider`);
 
       const {data:done,error:finishErr}=await db.rpc('market_shop_auto_delivery_finish',{
         p_order_id:orderId,
@@ -2697,8 +2719,9 @@ if(e.target.closest('#showDeliveryFareInfoBtn'))return showDeliveryFareInfo(fals
         pickups.push({type:'pickup',label:sh.name,lat,lng,note:sh.landmark||sh.address||'',shop_id:sh.id,contact_name:sh.name,contact_phone:sh.phone||''});
       }
       const drop={type:'dropoff',label:g.delivery_address||'จุดส่งลูกค้า',lat:Number(g.delivery_lat),lng:Number(g.delivery_lng),note:`ผู้รับ ${g.customer_name} โทร ${g.customer_phone}`,shop_id:null,contact_name:g.customer_name,contact_phone:g.customer_phone};
-      const stops=[...pickups,drop],km=routeKm(stops),fare=fareFor(km,pickups.length);
-      if(!fare)throw new Error(`เส้นทางรวมเกิน ${MAX_ROUTE_KM} กม. ซึ่งเกินพื้นที่ให้บริการของระบบ Rider`);
+      const road=await orsDeliveryRoute(pickups,drop);
+      const stops=[...road.pickups,drop],km=road.km,fare=road.fare;
+      if(!fare)throw new Error(`เส้นทางตามถนนจริงเกิน ${MAX_ROUTE_KM} กม. ซึ่งเกินพื้นที่ให้บริการของระบบ Rider`);
 
       const payer='recipient';
       const payerLabel='ลูกค้าปลายทาง';
