@@ -613,9 +613,11 @@ if(e.target.closest('#showDeliveryFareInfoBtn'))return showDeliveryFareInfo(fals
       if(e.target.closest('#deliveryMapConfirmBtn'))return confirmDeliveryMapPicker();
       if(e.target.closest('#deliveryMapCloseBtn')||e.target.closest('#deliveryMapBackdrop'))return closeDeliveryMapPicker();
       if(e.target.closest('#submitCheckoutBtn'))return submitCheckout();
+      const repairDelivery=e.target.closest('[data-resume-creating-delivery]');if(repairDelivery)return sellerResumeCreatingDelivery(repairDelivery.dataset.resumeCreatingDelivery);
       const accept=e.target.closest('[data-accept-order]');if(accept)return sellerAcceptOrder(accept.dataset.acceptOrder);
       const revise=e.target.closest('[data-revise-order]');if(revise)return sellerProposeRevision(revise.dataset.reviseOrder);
       const confirmRevision=e.target.closest('[data-confirm-revision]');if(confirmRevision)return customerConfirmRevision(confirmRevision.dataset.confirmRevision);
+      const reprice=e.target.closest('[data-requote-group]');if(reprice)return retryQuoteForGroup(reprice.dataset.requoteGroup,reprice);
       const cancelOrder=e.target.closest('[data-cancel-shop-order]');if(cancelOrder)return customerCancelShopOrder(cancelOrder.dataset.cancelShopOrder);
       const pay=e.target.closest('[data-pay-order]');if(pay)return openPayment(pay.dataset.payOrder);
       if(e.target.closest('#submitPaymentBtn'))return submitPayment();
@@ -1924,10 +1926,15 @@ if(e.target.closest('#showDeliveryFareInfoBtn'))return showDeliveryFareInfo(fals
     const pendingOrders=(activeOrders||[]).filter(o=>!batchedIds.has(String(o.id)));
     const ready=pendingOrders.filter(o=>o.status==='ready'),notReady=pendingOrders.filter(o=>o.status!=='ready');
     const cards=batches.map(b=>deliveryBatchCard(b,g.id)).join('');
-    const quoteWarning=!cards&&g.__quotePending?'<div class="warning-banner">⚠️ ค่าส่งกำลังรอคำนวณใหม่ กรุณายังไม่เรียก Rider</div>':'';
-    const estimate=!cards&&Number(g.estimated_delivery_fee)>0?`<div class="delivery-track"><div class="delivery-charge-notice"><small>ค่าจัดส่งที่ชำระให้ Rider</small><b>${money(g.estimated_delivery_fee)} บาท</b>${Number(g.estimated_distance_km)>0?`<span>${Number(g.estimated_distance_km).toFixed(1)} กม.</span>`:''}</div></div>`:'';
+    const hasLinkedRider=!!g.rider_job_id||batches.some(b=>!!b.rider_job_id);
+    const batchHasVerifiedFare=batches.some(b=>Number(b.delivery_fee)>0&&Number(b.distance_km)>0);
+    const quoteMissing=(!Number(g.estimated_delivery_fee)||!Number(g.estimated_distance_km))&&!batchHasVerifiedFare;
+    const quoteWarning=quoteMissing&&!['completed','cancelled'].includes(g.status)?
+      (hasLinkedRider?'<div class="warning-banner">⚠️ งาน Rider ถูกสร้างแล้ว แต่ไม่พบราคาจัดส่งที่ยืนยันได้ กรุณาแจ้งผู้ดูแล ห้ามรับงานจนกว่าจะตรวจสอบ</div>':
+      `<div class="warning-banner">⚠️ ค่าจัดส่งยังไม่พร้อม${g.__quoteError?' · '+esc(g.__quoteError):''} · อย่าเพิ่งเรียก Rider<div class="mo-actions"><button type="button" class="mo-secondary" data-requote-group="${esc(g.id)}">🔄 คำนวณค่าส่งใหม่</button></div></div>`):'';
+    const estimate=(!cards||(!batchHasVerifiedFare&&!hasLinkedRider))&&Number(g.estimated_delivery_fee)>0?`<div class="delivery-track"><div class="delivery-charge-notice"><small>ค่าจัดส่งที่ชำระให้ Rider</small><b>${money(g.estimated_delivery_fee)} บาท</b>${Number(g.estimated_distance_km)>0?`<span>${Number(g.estimated_distance_km).toFixed(1)} กม.</span>`:''}</div></div>`:'';
     const readiness=pendingOrders.length?`<div class="delivery-track"><b>${ready.length?`📦 พร้อมส่ง ${ready.length} ร้าน`:'⏳ ยังไม่มีร้านพร้อมส่ง'}${notReady.length?` · รออีก ${notReady.length} ร้าน`:''}</b>${ready.length&&notReady.length?`<div class="warning-banner" style="margin-top:8px">ระบบจะรอร้านในชุดเดียวกันยืนยันรับเงินครบ แล้วเรียก Rider รวมเที่ยวเดียว เพื่อไม่ให้ลูกค้าเสียค่าจัดส่งหลายรอบ</div>`:''}</div>`:'';
-    return cards+quoteWarning+estimate+readiness;
+    return quoteWarning+cards+estimate+readiness;
   }
   function customerGroupCard(g){
     const os=g.orders||[],activeOrders=os.filter(o=>o.status!=='cancelled'),pickupDoneCount=activeOrders.filter(o=>o.pickup_completed_at).length,readyCount=activeOrders.filter(o=>o.status==='ready'&&!o.pickup_completed_at).length,waitingCount=Math.max(0,activeOrders.length-readyCount-pickupDoneCount),allReady=activeOrders.length>0&&waitingCount===0,groupOpen=!['cancelled','completed'].includes(g.status),canDelivery=allReady&&groupOpen&&!g.rider_job_id;
@@ -1971,23 +1978,61 @@ if(e.target.closest('#showDeliveryFareInfoBtn'))return showDeliveryFareInfo(fals
       <div class="mo-muted order-ui-version">UI v${ORDER_UI_VERSION}</div>
     </div>`;
   }
+  // The database invalidates a quote when an order is cancelled. Never cache a
+  // *failed* quote as success; keep the retry button available to the customer.
   const requoteCheckedGroups=new Set();
+  const requoteNextAttemptAt=new Map();
+  async function getVerifiedRequote(input){
+    const {data:q,error:qe}=await db.functions.invoke('market-secure-delivery-estimate',{body:input});
+    if(qe||!q?.ok){
+      let remote=q?.error||null;
+      if(!remote&&qe?.context){try{const d=await qe.context.clone().json();remote=d?.error||d?.message||null;}catch(_e){}}
+      throw new Error(remote||qe?.message||'คำนวณค่าส่งใหม่ไม่สำเร็จ');
+    }
+    const fee=Number(q.delivery_fee),km=Number(q.distance_km);
+    if(!(fee>0&&km>0))throw new Error('เซิร์ฟเวอร์ไม่ได้ส่งค่าจัดส่งและระยะทางที่ถูกต้อง');
+    return {fee,km,raw:q};
+  }
+  async function retryQuoteForGroup(groupId,button=null){
+    if(!session?.user?.id)return requireLogin();
+    if(!groupId)return;
+    const oldText=button?.textContent||'🔄 คำนวณค่าส่งใหม่';
+    if(button){button.disabled=true;button.textContent='⏳ กำลังคำนวณด้วย ORS...';}
+    try{
+      const r=await getVerifiedRequote({group_id:groupId});
+      requoteCheckedGroups.add(String(groupId));
+      requoteNextAttemptAt.delete(String(groupId));
+      alert(`✅ ยืนยันค่าส่งใหม่ ${money(r.fee)} บาท · ระยะทาง ${r.km.toFixed(2)} กม.`);
+      await openAccountHub('customer');
+    }catch(err){
+      requoteNextAttemptAt.set(String(groupId),Date.now()+15000);
+      alert('ยังคำนวณค่าส่งไม่ได้: '+(err?.message||err)+'\nกรุณาอย่าเพิ่งเรียก Rider');
+    }finally{if(button?.isConnected){button.disabled=false;button.textContent=oldText;}}
+  }
   async function renderCustomerHub(box){
     box.innerHTML='กำลังโหลด...';
     const {data:groups,error}=await db.from('market_delivery_groups').select('*,orders:market_orders(id,shop_id,subtotal,status,payment_ref,payment_submitted_at,rejection_reason,shop_response_due_at,shop_accepted_at,shop_viewed_at,pickup_completed_at,revision_note,revision_subtotal,revision_requested_at,revision_confirmed_at,refund_required,refund_status,refund_amount,refund_ref,refund_slip_path,refund_submitted_at,refund_confirmed_at,refund_destination_type,refund_destination_promptpay_type,refund_destination_value,refund_destination_bank,refund_destination_name,refund_destination_submitted_at,created_at,shop:market_shops(name,latitude,longitude,phone,landmark,address),items:market_order_items(product_name,unit_price,qty,options_json,note)),batches:market_delivery_batches(id,status,rider_job_id,rider_name,rider_phone,delivery_fee,distance_km,created_at,accepted_at,pickup_started_at,picked_up_at,delivering_at,delivery_arrived_at,auto_confirm_due_at,auto_confirmed_at,proof_path,proof_uploaded_at,customer_confirmed_at,delivery_issue_status,delivery_issue_note,delivery_issue_at,proof_deleted_at,completed_at,batch_orders:market_delivery_batch_orders(order_id))').eq('customer_id',session.user.id).order('created_at',{ascending:false}).limit(100);
     if(error){box.innerHTML=`<div class="warning-banner">${esc(error.message)}</div>`;return}
-    // One-time re-quote for older cancelled groups that retained the pre-cancellation price.
+    // Re-quote cancelled groups or groups lacking a quote; failures are not
+    // permanently cached. Cool down for 15 seconds to avoid hammering ORS.
     for(const g of (groups||[]).filter(x=>
-      x.fulfillment_method==='delivery' && !['completed','cancelled'].includes(x.status) &&
-      (x.orders||[]).some(o=>o.status==='cancelled') &&
-      (x.orders||[]).some(o=>o.status!=='cancelled') &&
-      !x.rider_job_id && !(x.batches||[]).some(b=>!!b.rider_job_id) &&
-      !requoteCheckedGroups.has(String(x.id))).slice(0,2)){
-      requoteCheckedGroups.add(String(g.id));
-      const {data:q,error:qe}=await db.functions.invoke('market-secure-delivery-estimate',{body:{group_id:g.id}});
-      if(!qe&&q?.ok){g.estimated_delivery_fee=q.delivery_fee;g.estimated_distance_km=q.distance_km;}
-      else {g.estimated_delivery_fee=null;g.estimated_distance_km=null;g.__quotePending=true;
-        console.warn('Cancel re-quote not available:',q?.error||qe?.message||'unknown');}
+      x.fulfillment_method==='delivery'&&!['completed','cancelled'].includes(x.status)&&
+      (x.orders||[]).some(o=>o.status!=='cancelled')&&
+      !x.rider_job_id&&!(x.batches||[]).some(b=>!!b.rider_job_id)&&
+      ((!Number(x.estimated_delivery_fee)||!Number(x.estimated_distance_km))||
+        ((x.orders||[]).some(o=>o.status==='cancelled')&&!requoteCheckedGroups.has(String(x.id))))&&
+      Date.now()>=(requoteNextAttemptAt.get(String(x.id))||0)).slice(0,2)){
+      const gid=String(g.id);
+      requoteNextAttemptAt.set(gid,Date.now()+15000);
+      try{
+        const q=await getVerifiedRequote({group_id:gid});
+        g.estimated_delivery_fee=q.fee;g.estimated_distance_km=q.km;
+        requoteCheckedGroups.add(gid);requoteNextAttemptAt.delete(gid);
+      }catch(err){
+        g.estimated_delivery_fee=null;g.estimated_distance_km=null;
+        g.__quotePending=true;g.__quoteError=err?.message||'unknown';
+        console.warn('Cancel re-quote failed:',gid,g.__quoteError);
+      }
     }
     await hydrateCustomerDeliveryFareFallback(groups||[]);
     const filtered=(groups||[]).filter(g=>orderDateMatches(g.created_at)&&orderSearchMatchesGroup(g));
@@ -2278,7 +2323,7 @@ if(e.target.closest('#showDeliveryFareInfoBtn'))return showDeliveryFareInfo(fals
     const pendingActions=o.status==='pending_shop'?`<div class="warning-banner">${overdue?'⚠️ รอรับออเดอร์เกิน 15 นาทีแล้ว':'ลูกค้ายังไม่ได้ชำระเงิน ร้านสามารถโทรคุยและตรวจรายการก่อนรับได้'}</div><div class="mo-actions"><button class="mo-primary" data-accept-order="${o.id}">✅ รับออเดอร์</button><button class="mo-secondary" data-revise-order="${o.id}">✏️ เสนอเปลี่ยนรายการ/ยอด</button></div>`:'';
     const revisionWait=o.status==='awaiting_customer_confirmation'?`<div class="warning-banner">⏳ รอลูกค้ายืนยันรายการใหม่<br>${esc(o.revision_note||'')}<br>ยอดที่เสนอ <b>${money(o.revision_subtotal||o.subtotal)} บาท</b></div>`:'';
     const unseen=!isOrderSeen(o.id),nextAction=orderActionLabel(o);
-    return `<article class="order-card ${unseen?'order-unseen':''}" data-order-card-id="${esc(o.id)}"><div class="order-card-head"><div><div class="seller-order-title"><b>เลขอ้างอิง #${esc(sharedOrderRef(o.group?.id||o.group_id))}</b>${unseen?'<span class="order-new-badge">ใหม่</span>':''}<span class="order-age ${overdue?'urgent':''}">⏱ ${esc(sellerOrderAge(o))}</span></div>${nextAction?`<div class="order-next-action">ตอนนี้: <b>${esc(nextAction)}</b></div>`:''}<div class="mo-muted"><span class="seller-private-contact"${contactExpiry}>${esc(customerName)}${phone?` · ${esc(phone)} <a href="tel:${esc(phone)}">📞 โทรลูกค้า</a>`:privacy.terminal?' · 🔒 ปิดข้อมูลติดต่อแล้ว':''}</span><br>${o.group?.fulfillment_method==='pickup'?`🏪 รับเองที่ร้าน${o.group?.pickup_requested_at?` · ขอรับ ${new Date(o.group.pickup_requested_at).toLocaleString('th-TH')}`:' · รับเร็วที่สุด'}`:deliveryLocation}</div></div><span class="status-pill status-${esc(o.status)}">${esc(statusText(o.status))}</span></div><div class="order-items">${(o.items||[]).map(i=>renderOrderItem(i,false)).join('')}</div><b>ยอด ${money(o.subtotal)} บาท</b>${o.pickup_completed_at?`<div class="ready-banner">✅ ลูกค้ารับสินค้าแล้ว<br><small>${new Date(o.pickup_completed_at).toLocaleString('th-TH')}</small></div>`:''}${o.revision_confirmed_at&&o.revision_note?`<div class="ready-banner">✅ ลูกค้ายืนยันรายการแก้ไขแล้ว: ${esc(o.revision_note)}</div>`:''}${pendingActions}${revisionWait}${o.payment_ref?`<div>อ้างอิง: ${esc(o.payment_ref)}</div>`:''}${o.rejection_reason?`<div class="mo-muted">เหตุผลยกเลิก: ${esc(o.rejection_reason)}</div>`:''}${sellerOrderDeliveryInfo(o)}${refund}<div class="mo-actions">${o.payment_slip_path?`<button class="mo-secondary" onclick="window.marketOrderOpenSlip('${esc(o.payment_slip_path)}')">ดูสลิปชำระ</button>`:''}${o.status==='payment_review'?`<button class="mo-primary" data-order-id="${o.id}" data-order-status="preparing">✅ เงินเข้าแล้ว / เริ่มเตรียม</button><button class="mo-danger" data-order-id="${o.id}" data-order-status="awaiting_payment">ยังไม่พบยอด</button>`:''}${o.status==='preparing'&&!closed?`<button class="mo-primary" data-order-id="${o.id}" data-order-status="ready">📦 สินค้าพร้อมรับ</button>`:''}${o.status==='ready'&&o.group?.fulfillment_method==='pickup'&&!o.pickup_completed_at?`<button class="mo-primary" data-pickup-complete="${o.id}">✅ ลูกค้ารับสินค้าแล้ว</button>`:''}${rejectable?`<button class="mo-danger" data-reject-order="${o.id}">ปฏิเสธออเดอร์</button>`:''}</div></article>`;
+    return `<article class="order-card ${unseen?'order-unseen':''}" data-order-card-id="${esc(o.id)}"><div class="order-card-head"><div><div class="seller-order-title"><b>เลขอ้างอิง #${esc(sharedOrderRef(o.group?.id||o.group_id))}</b>${unseen?'<span class="order-new-badge">ใหม่</span>':''}<span class="order-age ${overdue?'urgent':''}">⏱ ${esc(sellerOrderAge(o))}</span></div>${nextAction?`<div class="order-next-action">ตอนนี้: <b>${esc(nextAction)}</b></div>`:''}<div class="mo-muted"><span class="seller-private-contact"${contactExpiry}>${esc(customerName)}${phone?` · ${esc(phone)} <a href="tel:${esc(phone)}">📞 โทรลูกค้า</a>`:privacy.terminal?' · 🔒 ปิดข้อมูลติดต่อแล้ว':''}</span><br>${o.group?.fulfillment_method==='pickup'?`🏪 รับเองที่ร้าน${o.group?.pickup_requested_at?` · ขอรับ ${new Date(o.group.pickup_requested_at).toLocaleString('th-TH')}`:' · รับเร็วที่สุด'}`:deliveryLocation}</div></div><span class="status-pill status-${esc(o.status)}">${esc(statusText(o.status))}</span></div><div class="order-items">${(o.items||[]).map(i=>renderOrderItem(i,false)).join('')}</div><b>ยอด ${money(o.subtotal)} บาท</b>${o.pickup_completed_at?`<div class="ready-banner">✅ ลูกค้ารับสินค้าแล้ว<br><small>${new Date(o.pickup_completed_at).toLocaleString('th-TH')}</small></div>`:''}${o.revision_confirmed_at&&o.revision_note?`<div class="ready-banner">✅ ลูกค้ายืนยันรายการแก้ไขแล้ว: ${esc(o.revision_note)}</div>`:''}${pendingActions}${revisionWait}${o.payment_ref?`<div>อ้างอิง: ${esc(o.payment_ref)}</div>`:''}${o.rejection_reason?`<div class="mo-muted">เหตุผลยกเลิก: ${esc(o.rejection_reason)}</div>`:''}${sellerOrderDeliveryInfo(o)}${(o.group?.fulfillment_method==='delivery' && ['preparing','ready'].includes(o.status) && !closed && (o.group?.batches||[]).some(b=>b.status==='creating' && !b.rider_job_id && (b.batch_orders||[]).some(x=>String(x.order_id)===String(o.id))))?`<div class="warning-banner">⚠️ งาน Rider ค้างอยู่ระหว่างสร้าง <button type="button" class="mo-secondary" data-resume-creating-delivery="${esc(o.id)}">🛠 ดำเนินงาน Rider เดิมต่อ</button></div>`:''}${refund}<div class="mo-actions">${o.payment_slip_path?`<button class="mo-secondary" onclick="window.marketOrderOpenSlip('${esc(o.payment_slip_path)}')">ดูสลิปชำระ</button>`:''}${o.status==='payment_review'?`<button class="mo-primary" data-order-id="${o.id}" data-order-status="preparing">✅ เงินเข้าแล้ว / เริ่มเตรียม</button><button class="mo-danger" data-order-id="${o.id}" data-order-status="awaiting_payment">ยังไม่พบยอด</button>`:''}${o.status==='preparing'&&!closed?`<button class="mo-primary" data-order-id="${o.id}" data-order-status="ready">📦 สินค้าพร้อมรับ</button>`:''}${o.status==='ready'&&o.group?.fulfillment_method==='pickup'&&!o.pickup_completed_at?`<button class="mo-primary" data-pickup-complete="${o.id}">✅ ลูกค้ารับสินค้าแล้ว</button>`:''}${rejectable?`<button class="mo-danger" data-reject-order="${o.id}">ปฏิเสธออเดอร์</button>`:''}</div></article>`;
   }
   function maskPhone(v){const x=String(v||'');if(x.length<7)return x?x.slice(0,2)+'X-XXX-'+x.slice(-3):'';return x.slice(0,2)+'X-XXX-'+x.slice(-3);}
 
@@ -2437,9 +2482,10 @@ if(e.target.closest('#showDeliveryFareInfoBtn'))return showDeliveryFareInfo(fals
   }
   // Recalculate secure server-side fare when a shop is cancelled.
   async function refreshQuoteForRemainingShops(orderId){
-    const {data:q,error:qe}=await db.functions.invoke('market-secure-delivery-estimate',{body:{order_id:orderId}});
-    if(qe||!q?.ok)return {ok:false,error:q?.error||qe?.message||'คำนวณค่าส่งใหม่ไม่สำเร็จ'};
-    return {ok:true,fee:Number(q.delivery_fee),km:Number(q.distance_km)};
+    try{
+      const q=await getVerifiedRequote({order_id:orderId});
+      return {ok:true,fee:q.fee,km:q.km};
+    }catch(err){return {ok:false,error:err?.message||'คำนวณค่าส่งใหม่ไม่สำเร็จ'};}
   }
   async function ensureServerQuoteForDispatch(orderId){
     const {data:o,error:e}=await db.from('market_orders').select('group_id').eq('id',orderId).maybeSingle();
@@ -2491,11 +2537,39 @@ if(e.target.closest('#showDeliveryFareInfoBtn'))return showDeliveryFareInfo(fals
     }
   }
 
-  async function autoCallRiderAfterPayment(orderId){
+  // STAGING: recover ONLY an existing creating batch through the guarded seller RPC.
+  // No new delivery batch can be created through the resume-only entrypoint.
+  const stagingResumeInFlight=new Set();
+  async function sellerResumeCreatingDelivery(orderId){
+    if(!session)return requireLogin();
+    if(stagingResumeInFlight.has(String(orderId)))return;
+    if(!confirm('ระบบจะตรวจ Batch ที่ค้างและเรียก Rider ต่อจากงานเดิม\n\nดำเนินการเฉพาะ Staging และเฉพาะออเดอร์ที่ยืนยันรับเงินแล้ว\nยืนยันทำต่อหรือไม่?'))return;
+    stagingResumeInFlight.add(String(orderId));
+    try{
+      const result=await autoCallRiderAfterPayment(orderId,{resumeOnly:true});
+      if(result?.ok&&result?.rider_job_id){
+        alert(`✅ เชื่อม Rider Job กับ Batch เดิมสำเร็จ\nค่าส่ง ${money(result.fare_estimate)} บาท`);
+      }else if(result?.already_called){
+        alert('มีงาน Rider อยู่แล้ว ระบบไม่ได้สร้างงานซ้ำ');
+      }else if(result?.skipped){
+        alert('ยังไม่สามารถทำต่อได้: '+(result.reason||'กรุณาตรวจสอบสถานะ Batch'));
+      }else{
+        alert('ยังดำเนินงาน Rider ต่อไม่สำเร็จ กรุณาดูข้อความ Error ใน Console แล้วหยุดการทดสอบ');
+      }
+    }finally{
+      stagingResumeInFlight.delete(String(orderId));
+      const sid=document.getElementById('sellerShopId')?.value;
+      if(sid&&document.getElementById('sellerOrdersOnly'))await openSellerOrders(sid,orderId);
+    }
+  }
+  // Emergency console access for Staging shop owner, same guarded resume flow.
+  window.KTB_STAGING_resumeCreatingDelivery=sellerResumeCreatingDelivery;
+
+  async function autoCallRiderAfterPayment(orderId,{resumeOnly=false}={}){
     try{
       console.info('auto rider begin',{order_id:orderId});
       await ensureServerQuoteForDispatch(orderId);
-      const {data:prep,error:prepErr}=await db.rpc('market_shop_auto_delivery_begin',{p_order_id:orderId});
+      const {data:prep,error:prepErr}=await db.rpc(resumeOnly?'market_shop_resume_creating_delivery_begin':'market_shop_auto_delivery_begin',{p_order_id:orderId});
       if(prepErr)throw prepErr;
       if(!prep||prep.skipped){
         console.info('auto rider skipped',prep||null);
